@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  134 tests, all passing
+flutter test                 →  142 tests, all passing
 flutter build apk --debug    →  built (174 MB, 3 ABIs)
 flutter build apk --release  →  built (110 MB, R8 + shrinker)
 ```
@@ -44,6 +44,7 @@ what is architected with a working seam but needs an external piece. See
 | Beat detection, waveforms | Implemented (local DSP) |
 | Voice recording | Implemented — level meter, pause/resume, clipping warning |
 | Export 480p–4K, H.264/HEVC, MP4/MOV, CRF or CBR, hardware encoding | Implemented + tested |
+| Background export with progress notification | Implemented — foreground service |
 | Auto-save, backups, project bundles (import/export) | Implemented |
 | AI: scene detect, colour enhance, upscale, voice isolation | Implemented — local FFmpeg DSP |
 | AI: captions, background removal, object/face tracking | Architected — needs a model backend, see below |

@@ -14,7 +14,7 @@ import '../error/failure.dart';
 import '../error/result.dart';
 import '../logging/app_logger.dart';
 
-enum MediaPermissionKind { video, audio, images, microphone }
+enum MediaPermissionKind { video, audio, images, microphone, notifications }
 
 class PermissionService {
   PermissionService({DeviceSdkReader? sdkReader})
@@ -29,6 +29,14 @@ class PermissionService {
 
   Future<List<Permission>> _resolve(MediaPermissionKind kind) async {
     if (kind == MediaPermissionKind.microphone) return [Permission.microphone];
+
+    // POST_NOTIFICATIONS became a runtime permission in Android 13. Below that
+    // it is granted implicitly, so asking would return permanentlyDenied and
+    // wrongly send the user to system settings.
+    if (kind == MediaPermissionKind.notifications) {
+      if (!Platform.isAndroid) return const [];
+      return await _sdkInt() >= 33 ? [Permission.notification] : const [];
+    }
     if (!Platform.isAndroid) return [Permission.photos];
 
     final sdk = await _sdkInt();
@@ -38,6 +46,7 @@ class PermissionService {
         MediaPermissionKind.audio => [Permission.audio],
         MediaPermissionKind.images => [Permission.photos],
         MediaPermissionKind.microphone => [Permission.microphone],
+        MediaPermissionKind.notifications => [Permission.notification],
       };
     }
     // API ≤ 32: one coarse storage permission covers all media types.
@@ -46,6 +55,9 @@ class PermissionService {
 
   Future<Result<void>> request(MediaPermissionKind kind) async {
     final permissions = await _resolve(kind);
+    // Nothing to ask for — implicitly granted on this platform/API level.
+    if (permissions.isEmpty) return const Result.ok(null);
+
     final statuses = <Permission, PermissionStatus>{};
     for (final permission in permissions) {
       statuses[permission] = await permission.request();
@@ -105,6 +117,7 @@ class PermissionService {
     MediaPermissionKind.audio => 'Audio',
     MediaPermissionKind.images => 'Photo',
     MediaPermissionKind.microphone => 'Microphone',
+    MediaPermissionKind.notifications => 'Notification',
   };
 }
 

@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 134 tests passing, debug and release
+Verified state: `flutter analyze` clean, 142 tests passing, debug and release
 APKs build.
 
 ---
@@ -153,8 +153,22 @@ The UI copy says both things rather than implying otherwise.
 | Custom bitrate or CRF quality | Implemented + tested |
 | Hardware encoding + software fallback | Implemented |
 | Progress, speed, ETA, cancel | Implemented |
+| Background export (foreground service) | Implemented — see note 6 |
 | Save to gallery (MediaStore) | Implemented — Kotlin bridge |
 | Share sheet | Implemented |
+
+**Note 6 — background export.** A foreground service promotes the process to
+foreground importance for the duration of a render, with a progress
+notification and a Cancel action. FFmpeg still runs inside the Flutter process;
+the service does not relocate it. What it buys is that the export survives the
+user leaving the app, the screen turning off, and memory pressure from other
+apps — the things that actually kill long renders. It does **not** survive a
+force-stop or a reboot, and it is not a headless service: it keeps the existing
+process alive rather than running without one.
+
+`mediaProcessing` is API 34+, so the manifest declares
+`mediaProcessing|dataSync` and the service picks the right one at runtime —
+declaring the wrong type on Android 14 is a hard crash, not a warning.
 
 ## Project management
 
@@ -196,9 +210,10 @@ suits an editor better than tabs |
 Worth stating plainly:
 
 1. **Auto-caption needs a backend.** No model ships with the app.
-2. **Background export does not survive process death.** The permission is
-   declared; the foreground service is not written. Exports survive navigating
-   away, but not the process being killed.
+2. **Background export does not survive a force-stop or reboot.** The
+   foreground service covers backgrounding, screen-off and memory pressure;
+   nothing short of a second process would cover the rest, and that would mean
+   shipping FFmpeg twice.
 3. **Preview caps at 4 concurrent video layers.** Android's decoder pool is
    small and device-dependent. Export is unaffected.
 4. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette

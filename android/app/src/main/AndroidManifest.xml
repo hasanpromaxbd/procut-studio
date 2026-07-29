@@ -91,6 +91,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Keeps a render alive while the app is backgrounded. `mediaProcessing`
+             is API 34+; the service falls back to `dataSync` below that, so both
+             are declared or Android 14 rejects the start with
+             MissingForegroundServiceTypeException. -->
+        <service
+            android:name=".ExportService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="mediaProcessing|dataSync" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

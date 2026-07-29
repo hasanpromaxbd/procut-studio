@@ -22,7 +22,10 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CHANNEL = "com.procutstudio.procut_studio/mediastore"
+        const val EXPORT_CHANNEL = "com.procutstudio.procut_studio/export_service"
     }
+
+    private var exportChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,6 +43,67 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        configureExportChannel(flutterEngine)
+    }
+
+    /**
+     * Bridges the export foreground service to Dart.
+     *
+     * The Activity owns this rather than the service because the Flutter
+     * engine's lifecycle is tied to the Activity. The service raises the
+     * process's importance so the Activity — and therefore the engine and the
+     * running FFmpeg session — is not reclaimed while the user is elsewhere.
+     */
+    private fun configureExportChannel(flutterEngine: FlutterEngine) {
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            EXPORT_CHANNEL
+        )
+        exportChannel = channel
+
+        // A Cancel tap on the notification arrives here and is forwarded to the
+        // Dart side, which owns the FFmpeg session and knows how to unwind it.
+        ExportService.onCancelRequested = {
+            runOnUiThread { channel.invokeMethod("onCancelRequested", null) }
+        }
+
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    ExportService.start(
+                        this,
+                        call.argument<String>("title") ?: "Exporting",
+                        call.argument<String>("message") ?: "Preparing"
+                    )
+                    result.success(true)
+                }
+
+                "update" -> {
+                    ExportService.update(
+                        this,
+                        call.argument<String>("message") ?: "",
+                        call.argument<Int>("progress") ?: 0,
+                        call.argument<Boolean>("indeterminate") ?: false
+                    )
+                    result.success(true)
+                }
+
+                "stop" -> {
+                    ExportService.stop(this)
+                    result.success(true)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        ExportService.onCancelRequested = null
+        exportChannel?.setMethodCallHandler(null)
+        exportChannel = null
+        super.onDestroy()
     }
 
     private fun handleInsertVideo(

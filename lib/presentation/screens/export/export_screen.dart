@@ -4,6 +4,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/di/providers.dart';
+import '../../../core/services/permission_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_utils.dart';
@@ -65,9 +67,18 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                   icon: Icons.movie_filter_rounded,
                   expand: true,
                   onPressed: settings.validate().isEmpty
-                      ? () => ref
-                            .read(exportControllerProvider.notifier)
-                            .start(editor.project, settings)
+                      ? () async {
+                          // Asked for, but never required: without it the
+                          // export still runs, it just cannot show progress in
+                          // the shade. Blocking the render over a notification
+                          // would be absurd.
+                          await ref
+                              .read(permissionServiceProvider)
+                              .request(MediaPermissionKind.notifications);
+                          await ref
+                              .read(exportControllerProvider.notifier)
+                              .start(editor.project, settings);
+                        }
                       : null,
                 ),
               ),

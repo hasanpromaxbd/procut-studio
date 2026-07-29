@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import '../../core/error/failure.dart';
 import '../../core/error/result.dart';
 import '../../core/logging/app_logger.dart';
+import '../../core/services/export_service_channel.dart';
 import '../../core/services/media_store_channel.dart';
 import '../../core/services/path_service.dart';
 import '../../core/utils/file_utils.dart';
@@ -36,13 +37,15 @@ class ExportEngine implements ExportRepository {
     required HardwareEncoderProbe encoderProbe,
     required LayerRasteriser rasteriser,
     MediaStorePublisher? publisher,
+    ExportServiceChannel? serviceChannel,
     TimelineCompiler compiler = const TimelineCompiler(),
   })  : _ffmpeg = ffmpeg,
         _paths = paths,
         _encoderProbe = encoderProbe,
         _rasteriser = rasteriser,
         _compiler = compiler,
-        _publisher = publisher ?? const MediaStorePublisher();
+        _publisher = publisher ?? const MediaStorePublisher(),
+        _serviceChannel = serviceChannel ?? ExportServiceChannel();
 
   static const _log = Log('ExportEngine');
 
@@ -52,6 +55,9 @@ class ExportEngine implements ExportRepository {
   final LayerRasteriser _rasteriser;
   final MediaStorePublisher _publisher;
   final TimelineCompiler _compiler;
+  final ExportServiceChannel _serviceChannel;
+
+  StreamSubscription<void>? _notificationCancelSub;
 
   final Map<String, ExportJob> _active = {};
   final List<ExportJob> _history = [];
@@ -93,6 +99,17 @@ class ExportEngine implements ExportRepository {
 
     try {
       await workspace.create(recursive: true);
+
+      // Promote the process before any long work starts. A Cancel tap on the
+      // notification unwinds the job exactly like the in-app button does.
+      await _serviceChannel.start(
+        title: 'Exporting "${project.name}"',
+        message: 'Preparing',
+      );
+      await _notificationCancelSub?.cancel();
+      _notificationCancelSub = _serviceChannel.cancelRequests.listen(
+        (_) => unawaited(cancel(jobId)),
+      );
 
       final outputFile = await _paths.exportFile(
         settings.fileNameOverride ?? project.name,
@@ -261,7 +278,10 @@ class ExportEngine implements ExportRepository {
         plan: plan,
         jobId: jobId,
         encodeStart: encodeStart,
-        onProgress: (p) => progress = progress.copyWith(progress: p),
+        onProgress: (p) {
+          progress = progress.copyWith(progress: p);
+          _publishProgress(progress);
+        },
         onStats: (stats) {
           progress = progress.copyWith(
             processedDuration: stats.processedDuration,
@@ -370,6 +390,11 @@ class ExportEngine implements ExportRepository {
     } finally {
       _active.remove(jobId);
       _cancelled.remove(jobId);
+      await _notificationCancelSub?.cancel();
+      _notificationCancelSub = null;
+      // Always stop the service: leaving a foreground notification behind after
+      // a finished or failed export is worse than never showing one.
+      await _serviceChannel.stop();
       await FileUtils.deleteDirQuietly(workspace);
     }
   }
@@ -388,6 +413,27 @@ class ExportEngine implements ExportRepository {
       totalDuration: plan.duration,
       onStats: onStats,
       onProgress: (p) => onProgress(encodeStart + span * p),
+    );
+  }
+
+  int _lastPublishedPercent = -1;
+
+  /// Mirrors progress into the notification.
+  ///
+  /// Throttled to whole percentage points: FFmpeg reports statistics several
+  /// times a second, and re-posting a notification that often is a measurable
+  /// battery cost for no visible benefit.
+  void _publishProgress(ExportProgress progress) {
+    final percent = progress.percent;
+    if (percent == _lastPublishedPercent) return;
+    _lastPublishedPercent = percent;
+
+    unawaited(
+      _serviceChannel.update(
+        message: progress.message ?? progress.stage.label,
+        progress: percent,
+        indeterminate: progress.progress <= 0,
+      ),
     );
   }
 
