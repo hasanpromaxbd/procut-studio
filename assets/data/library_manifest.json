@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "note": "Bundled creative assets. Anything shipped here must be original work or covered by a licence recorded in `attribution`. Remote packs are merged on top of this at runtime.",
+  "items": [
+    {
+      "id": "lut_teal_orange",
+      "name": "Teal & Orange",
+      "category": "lut",
+      "collection": "Cinematic",
+      "bundled": "assets/luts/teal_orange.cube",
+      "tags": ["cinematic", "blockbuster", "complementary"],
+      "attribution": "Original transfer function, ProCut Studio"
+    },
+    {
+      "id": "lut_bleach_bypass",
+      "name": "Bleach Bypass",
+      "category": "lut",
+      "collection": "Cinematic",
+      "bundled": "assets/luts/bleach_bypass.cube",
+      "tags": ["contrast", "desaturated", "gritty"],
+      "attribution": "Original transfer function, ProCut Studio"
+    },
+    {
+      "id": "lut_warm_film",
+      "name": "Warm Film",
+      "category": "lut",
+      "collection": "Analogue",
+      "bundled": "assets/luts/warm_film.cube",
+      "tags": ["warm", "film", "vintage"],
+      "attribution": "Original transfer function, ProCut Studio"
+    },
+    {
+      "id": "lut_moody_blue",
+      "name": "Moody Blue",
+      "category": "lut",
+      "collection": "Analogue",
+      "bundled": "assets/luts/moody_blue.cube",
+      "tags": ["cool", "night", "moody"],
+      "attribution": "Original transfer function, ProCut Studio"
+    },
+
+    { "id": "emoji_fire", "name": "Fire", "category": "emoji", "collection": "Reactions", "tags": ["hot", "lit"] },
+    { "id": "emoji_sparkles", "name": "Sparkles", "category": "emoji", "collection": "Reactions", "tags": ["shine", "magic"] },
+    { "id": "emoji_heart", "name": "Heart", "category": "emoji", "collection": "Reactions", "tags": ["love"] },
+    { "id": "emoji_laugh", "name": "Laughing", "category": "emoji", "collection": "Reactions", "tags": ["funny"] },
+    { "id": "emoji_shock", "name": "Shocked", "category": "emoji", "collection": "Reactions", "tags": ["wow"] },
+    { "id": "emoji_clap", "name": "Clap", "category": "emoji", "collection": "Reactions", "tags": ["applause"] },
+    { "id": "emoji_think", "name": "Thinking", "category": "emoji", "collection": "Reactions", "tags": ["hmm"] },
+    { "id": "emoji_party", "name": "Party", "category": "emoji", "collection": "Reactions", "tags": ["celebrate"] },
+    { "id": "emoji_rocket", "name": "Rocket", "category": "emoji", "collection": "Reactions", "tags": ["launch", "growth"] },
+    { "id": "emoji_eyes", "name": "Eyes", "category": "emoji", "collection": "Reactions", "tags": ["look"] },
+    { "id": "emoji_hundred", "name": "Hundred", "category": "emoji", "collection": "Reactions", "tags": ["perfect"] },
+    { "id": "emoji_star", "name": "Star", "category": "emoji", "collection": "Reactions", "tags": ["favourite"] }
+  ]
+}

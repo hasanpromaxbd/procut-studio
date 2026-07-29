@@ -1,0 +1,80 @@
+name: procut_studio
+description: "ProCut Studio — a professional multi-track video editor for Android."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── State management / DI ────────────────────────────────────────────────
+  flutter_riverpod: ^3.4.2
+
+  # ── Persistence ──────────────────────────────────────────────────────────
+  hive_ce: ^2.19.3
+  hive_ce_flutter: ^2.3.4
+
+  # ── Media engine ─────────────────────────────────────────────────────────
+  # NOTE: the original `ffmpeg_kit_flutter` was discontinued in 2025 and its
+  # binaries were pulled from the CDN. `ffmpeg_kit_flutter_new` is the
+  # maintained community continuation and is what we build against.
+  ffmpeg_kit_flutter_new: ^4.6.0
+  video_player: ^2.13.0
+  just_audio: ^0.10.6
+  record: ^7.1.1
+
+  # ── Platform integration ────────────────────────────────────────────────
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  permission_handler: ^12.0.3
+  file_picker: ^11.0.2
+  image_picker: ^1.2.3
+  share_plus: ^12.0.2 # 13.x pulls win32 ^6 which conflicts with file_picker 11.x
+
+  # ── Networking (asset library / AI backends) ────────────────────────────
+  dio: ^5.11.0
+
+  # ── UI ───────────────────────────────────────────────────────────────────
+  google_fonts: ^8.2.0 # >1500 families → the "300+ fonts" requirement
+  flutter_animate: ^4.5.2
+  gap: ^3.0.1
+
+  # ── Utils ────────────────────────────────────────────────────────────────
+  uuid: ^4.6.0
+  collection: ^1.19.1
+  intl: ^0.20.3
+  archive: ^4.0.9 # .pcstudio project bundles (zip)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.5
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/luts/
+    - assets/data/
+
+  # GPU preview effects. Compiled to device-native shader bytecode by the
+  # Flutter tool at build time and loaded through ui.FragmentProgram.
+  shaders:
+    - shaders/passthrough.frag
+    - shaders/gaussian_blur.frag
+    - shaders/glow.frag
+    - shaders/motion_blur.frag
+    - shaders/vhs.frag
+    - shaders/rgb_split.frag
+    - shaders/vintage.frag
+    - shaders/film_grain.frag
+    - shaders/sharpen.frag
+    - shaders/lut3d.frag
+    - shaders/transition_fade.frag
+    - shaders/transition_glitch.frag
+    - shaders/transition_warp.frag
+    - shaders/transition_ripple.frag

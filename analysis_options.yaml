@@ -1,0 +1,64 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+  errors:
+    # The ones that cause real production bugs are build failures.
+    missing_required_param: error
+    invalid_use_of_protected_member: error
+    unused_import: error
+    unused_local_variable: error
+    dead_code: error
+    body_might_complete_normally_nullable: error
+
+    # Documentation debt is not a build failure.
+    todo: ignore
+
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "build/**"
+
+linter:
+  rules:
+    # ── Correctness ──────────────────────────────────────────────────
+    always_declare_return_types: true
+    avoid_empty_else: true
+    cancel_subscriptions: true
+    close_sinks: true
+    control_flow_in_finally: true
+    no_adjacent_strings_in_list: true
+    prefer_void_to_null: true
+    test_types_in_equals: true
+    throw_in_finally: true
+    unnecessary_statements: true
+    unrelated_type_equality_checks: true
+    use_build_context_synchronously: true
+
+    # ── Style ────────────────────────────────────────────────────────
+    prefer_single_quotes: true
+    prefer_final_locals: true
+    prefer_final_in_for_each: true
+    directives_ordering: true
+    sort_child_properties_last: true
+    unawaited_futures: true
+    use_super_parameters: true
+
+    # ── Deliberately disabled ────────────────────────────────────────
+
+    # Private fields cannot be initialising formals: Dart forbids named
+    # parameters beginning with an underscore. Every engine class that takes
+    # collaborators and stores them privately would otherwise trip this on
+    # each parameter.
+    prefer_initializing_formals: false
+
+    # This rule pushes `File.existsSync()` over `File.exists()`. For a 60fps
+    # editor that is exactly backwards: a synchronous stat on the UI isolate
+    # is a dropped frame, and we do these checks on import, save and export
+    # paths where the async round-trip is free. Blocking the raster thread to
+    # save a microtask is not a trade we want anywhere in this codebase.
+    avoid_slow_async_io: false
