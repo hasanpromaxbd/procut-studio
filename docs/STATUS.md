@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 119 tests passing, debug and release
+Verified state: `flutter analyze` clean, 134 tests passing, debug and release
 APKs build.
 
 ---
@@ -66,6 +66,14 @@ All 14 have both a GPU shader (preview) and an FFmpeg filter (export).
 frames), spatial in preview (only one frame is available). The inspector says
 so rather than letting the user find out at render time.
 
+**Keyframed effects on export.** Animated effect parameters are driven by an
+FFmpeg `sendcmd` script generated per clip and sampled at 10 Hz, so a blur that
+ramps over two seconds ramps in the render too. This works for every effect
+whose filter advertises command support. Three do not — **Sharpen**
+(`unsharp`), **Film grain** (`noise`) and **Vignette** — and those export at
+their first-frame value, with an export warning saying so. Verified against a
+real ffmpeg binary by `tool/verify_sendcmd.sh`.
+
 ## Transitions
 
 | Transition | Export | Preview |
@@ -98,7 +106,7 @@ marks the expensive ones.
 | Beat detection | Implemented | Local DSP, `WaveformService.detectBeats` |
 | Waveforms | Implemented | 8 kHz PCM, cached |
 | Noise reduction / voice isolation | Implemented | `afftdn` + speech-band chain |
-| Voice recording | **Wired** | `record` configured; no UI surface yet |
+| Voice recording | Implemented | Level meter, pause/resume, clipping warning, inserts at playhead |
 | Background music library | Implemented | Bundled manifest + optional remote |
 
 **Note 4 — atempo.** Only accepts 0.5–2.0 per instance, so larger changes are
@@ -187,15 +195,16 @@ suits an editor better than tabs |
 
 Worth stating plainly:
 
-1. **Voice recording has no UI.** The engine and permission plumbing are done.
-2. **Auto-caption needs a backend.** No model ships with the app.
-3. **Background export does not survive process death.** The permission is
-   declared; the foreground service is not written.
-4. **Preview caps at 4 concurrent video layers.** Export is unaffected.
-5. **Effect keyframes are not exported per-frame.** The compiler resolves
-   effect parameters at `t=0`; animated *effect* parameters render as static on
-   export. Transform and volume keyframes are unaffected. Fixing this needs
-   `sendcmd`-driven filter parameters or segment splitting.
-6. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
+1. **Auto-caption needs a backend.** No model ships with the app.
+2. **Background export does not survive process death.** The permission is
+   declared; the foreground service is not written. Exports survive navigating
+   away, but not the process being killed.
+3. **Preview caps at 4 concurrent video layers.** Android's decoder pool is
+   small and device-dependent. Export is unaffected.
+4. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette
+   use FFmpeg filters with no runtime-command support, so a keyframed one
+   renders at its first-frame value. The export warns rather than silently
+   flattening it.
+5. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
    plugin skips applying the Kotlin plugin on AGP 9. Removable once upstream
    ships a fix.

@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/providers.dart';
+import '../../../core/error/failure.dart';
 import '../../../core/services/permission_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
@@ -28,6 +29,7 @@ import '../../widgets/editor/preview_stage.dart';
 import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
 import 'sheets/effects_sheet.dart';
+import 'sheets/record_sheet.dart';
 import 'sheets/speed_sheet.dart';
 import 'sheets/text_sheet.dart';
 import 'sheets/transition_sheet.dart';
@@ -329,6 +331,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: TextSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.record:
+        await _recordVoiceOver();
+
       case _ToolAction.rotate:
         controller.rotateSelected();
 
@@ -344,6 +349,38 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       case _ToolAction.addTrack:
         controller.addTrack(TrackType.overlay);
     }
+  }
+
+  /// Mic permission is requested before the sheet opens, so the user is not
+  /// shown a recorder they cannot actually start.
+  Future<void> _recordVoiceOver() async {
+    final permissions = ref.read(permissionServiceProvider);
+    final granted = await permissions.request(MediaPermissionKind.microphone);
+
+    if (!mounted) return;
+    if (granted.isErr) {
+      final failure = granted.failureOrNull!;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(failure.message),
+          action: failure is PermissionFailure && failure.permanentlyDenied
+              ? SnackBarAction(
+                  label: 'Settings',
+                  onPressed: () => unawaited(permissions.openSettings()),
+                )
+              : null,
+        ),
+      );
+      return;
+    }
+
+    // Recording while the timeline plays would capture the playback itself.
+    ref.read(playheadControllerProvider.notifier).pause();
+
+    await ToolSheet.show<void>(
+      context,
+      sheet: RecordSheet(projectId: widget.projectId),
+    );
   }
 
   Future<void> _importMedia() async {
@@ -499,6 +536,7 @@ enum _ToolAction {
   effects,
   transition,
   text,
+  record,
   rotate,
   flip,
   freeze,
@@ -555,6 +593,11 @@ class _ToolRail extends ConsumerWidget {
         icon: Icons.title_rounded,
         label: 'Text',
         onPressed: () => onAction(_ToolAction.text),
+      ),
+      ToolIconButton(
+        icon: Icons.mic_rounded,
+        label: 'Record',
+        onPressed: () => onAction(_ToolAction.record),
       ),
       ToolIconButton(
         icon: Icons.rotate_90_degrees_cw_rounded,

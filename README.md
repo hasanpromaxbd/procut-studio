@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  119 tests, all passing
+flutter test                 →  134 tests, all passing
 flutter build apk --debug    →  built (174 MB, 3 ABIs)
 flutter build apk --release  →  built (110 MB, R8 + shrinker)
 ```
@@ -35,14 +35,14 @@ what is architected with a working seam but needs an external piece. See
 | Split / trim / move / duplicate / delete / ripple | Implemented + tested |
 | Speed 0.1×–10×, reverse, freeze frame | Implemented + tested |
 | Crop / rotate / flip / opacity / blend modes | Implemented |
-| Keyframe animation with easing curves | Implemented + tested |
+| Keyframe animation with easing curves | Implemented + tested — animates on export via `sendcmd` |
 | 14 effects (blur, glow, VHS, RGB split, grain, LUT, …) | Implemented — GPU shader + FFmpeg filter |
 | 10 transitions | Implemented — 6 native `xfade`, 4 via custom per-pixel expressions |
 | Text layers, 1500+ fonts, gradient/stroke/glow/shadow, 11 animations | Implemented |
 | Sticker and emoji layers | Implemented |
 | Audio: volume automation, fades, EQ, pitch, speed, mixing | Implemented |
 | Beat detection, waveforms | Implemented (local DSP) |
-| Voice recording | Wired (`record`), UI surface pending |
+| Voice recording | Implemented — level meter, pause/resume, clipping warning |
 | Export 480p–4K, H.264/HEVC, MP4/MOV, CRF or CBR, hardware encoding | Implemented + tested |
 | Auto-save, backups, project bundles (import/export) | Implemented |
 | AI: scene detect, colour enhance, upscale, voice isolation | Implemented — local FFmpeg DSP |

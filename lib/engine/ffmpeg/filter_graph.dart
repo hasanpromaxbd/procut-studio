@@ -20,6 +20,13 @@ class Filter {
   /// (`fps`, `atempo`, …).
   final List<String> positional = [];
 
+  /// Instance name, emitted as `filter@label`.
+  ///
+  /// This is what makes a filter addressable by `sendcmd`: without a label
+  /// there is no way to say *which* `gblur` in a graph a command is for, and a
+  /// graph typically contains several.
+  String? instanceLabel;
+
   Filter arg(String value) {
     positional.add(value);
     return this;
@@ -30,6 +37,15 @@ class Filter {
     return this;
   }
 
+  /// Names this instance so runtime commands can target it.
+  Filter labelled(String label) {
+    instanceLabel = label;
+    return this;
+  }
+
+  String get qualifiedName =>
+      instanceLabel == null ? name : '$name@$instanceLabel';
+
   String build() {
     final parts = <String>[
       ...positional.map(FilterGraph.escapeValue),
@@ -37,7 +53,7 @@ class Filter {
           .where((e) => e.value != null)
           .map((e) => '${e.key}=${FilterGraph.escapeValue(e.value!)}'),
     ];
-    return parts.isEmpty ? name : '$name=${parts.join(':')}';
+    return parts.isEmpty ? qualifiedName : '$qualifiedName=${parts.join(':')}';
   }
 
   @override

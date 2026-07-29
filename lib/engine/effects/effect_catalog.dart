@@ -47,6 +47,36 @@ class EffectParamSpec {
   double denormalise(double t) => min + (max - min) * t.clamp(0.0, 1.0);
 }
 
+/// Binds an effect's animated value to a runtime-settable FFmpeg filter
+/// parameter, so keyframed effects animate on export instead of freezing at
+/// their `t=0` value.
+///
+/// Only filters that advertise command support (the `C` flag in
+/// `ffmpeg -filters`) can be driven this way. The ones used here that
+/// **cannot** are `unsharp`, `noise` and `vignette` — effects built on those
+/// render with their first-frame value and say so in the inspector.
+@immutable
+class EffectCommandBinding {
+  const EffectCommandBinding({
+    required this.filter,
+    required this.parameter,
+    required this.valueAt,
+  });
+
+  /// FFmpeg filter name, e.g. `gblur`. Must match a filter emitted by
+  /// [EffectSpec.buildFilters] — the compiler labels that instance so
+  /// `sendcmd` can address it.
+  final String filter;
+
+  /// Parameter on that filter, e.g. `sigma`.
+  final String parameter;
+
+  /// Computes the value at an already-resolved instant. Deliberately the same
+  /// arithmetic the static path uses, so an animated effect at a constant
+  /// value renders identically to a non-animated one.
+  final double Function(ResolvedEffect effect) valueAt;
+}
+
 @immutable
 class EffectSpec {
   const EffectSpec({
@@ -58,8 +88,15 @@ class EffectSpec {
     required this.params,
     required this.shaderAsset,
     required this.buildFilters,
+    this.commands = const [],
     this.isAudioEffect = false,
   });
+
+  /// Runtime-command bindings. Empty means this effect cannot be animated on
+  /// export and renders at its `t=0` value.
+  final List<EffectCommandBinding> commands;
+
+  bool get supportsExportAnimation => commands.isNotEmpty;
 
   final EffectType type;
   final String label;
@@ -125,6 +162,14 @@ abstract final class EffectCatalog {
           unit: 'px',
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'gblur',
+          parameter: 'sigma',
+          // Mirrors the static path exactly: sigma ≈ radius/3.
+          valueAt: (fx) => (fx.value('radius', 8) * fx.intensity) / 3,
+        ),
+      ],
       buildFilters: (fx) {
         final radius = fx.value('radius', 8) * fx.intensity;
         if (radius < 0.3) return const [];
@@ -163,6 +208,17 @@ abstract final class EffectCatalog {
           isAngle: true,
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'tmix',
+          parameter: 'frames',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.5) * fx.intensity).clamp(0.0, 1.0);
+            return (2 + amount * 6).roundToDouble().clamp(2, 8);
+          },
+        ),
+      ],
       buildFilters: (fx) {
         final amount = (fx.value('amount', 0.5) * fx.intensity).clamp(0.0, 1.0);
         if (amount < 0.02) return const [];
@@ -198,6 +254,26 @@ abstract final class EffectCatalog {
           defaultValue: 0.6,
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'gblur',
+          parameter: 'sigma',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.5) * fx.intensity).clamp(0.0, 1.0);
+            return 4 + amount * 12;
+          },
+        ),
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'brightness',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.5) * fx.intensity).clamp(0.0, 1.0);
+            return amount * 0.06;
+          },
+        ),
+      ],
       buildFilters: (fx) {
         final amount = (fx.value('amount', 0.5) * fx.intensity).clamp(0.0, 1.0);
         if (amount < 0.02) return const [];
@@ -229,6 +305,17 @@ abstract final class EffectCatalog {
           min: 0,
           max: 1,
           defaultValue: 0.7,
+        ),
+      ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'brightness',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.7) * fx.intensity).clamp(0.0, 1.0);
+            return amount * 0.5;
+          },
         ),
       ],
       buildFilters: (fx) {
@@ -265,6 +352,28 @@ abstract final class EffectCatalog {
           min: 0,
           max: 1,
           defaultValue: 0.5,
+        ),
+      ],
+      commands: [
+        // Only the chroma smear animates: `noise` has no command support, so
+        // the grain component holds its first-frame value.
+        EffectCommandBinding(
+          filter: 'chromashift',
+          parameter: 'cbh',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.6) * fx.intensity).clamp(0.0, 1.0);
+            return (amount * 6).roundToDouble();
+          },
+        ),
+        EffectCommandBinding(
+          filter: 'chromashift',
+          parameter: 'crh',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.6) * fx.intensity).clamp(0.0, 1.0);
+            return -(amount * 4).roundToDouble();
+          },
         ),
       ],
       buildFilters: (fx) {
@@ -315,6 +424,20 @@ abstract final class EffectCatalog {
           isAngle: true,
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'rgbashift',
+          parameter: 'rh',
+          valueAt: (fx) =>
+              (fx.value('offset', 8) * fx.intensity).roundToDouble(),
+        ),
+        EffectCommandBinding(
+          filter: 'rgbashift',
+          parameter: 'bh',
+          valueAt: (fx) =>
+              -(fx.value('offset', 8) * fx.intensity).roundToDouble(),
+        ),
+      ],
       buildFilters: (fx) {
         final offset = (fx.value('offset', 8) * fx.intensity).round();
         if (offset == 0) return const [];
@@ -338,6 +461,17 @@ abstract final class EffectCatalog {
           min: 0,
           max: 1,
           defaultValue: 0.7,
+        ),
+      ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'saturation',
+          valueAt: (fx) {
+            final amount =
+                (fx.value('amount', 0.7) * fx.intensity).clamp(0.0, 1.0);
+            return 1 - amount * 0.35;
+          },
         ),
       ],
       buildFilters: (fx) {
@@ -469,6 +603,20 @@ abstract final class EffectCatalog {
           defaultValue: 0.5,
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'hqdn3d',
+          parameter: 'luma_spatial',
+          valueAt: (fx) =>
+              (fx.value('strength', 0.5) * fx.intensity).clamp(0.0, 1.0) * 6,
+        ),
+        EffectCommandBinding(
+          filter: 'hqdn3d',
+          parameter: 'chroma_spatial',
+          valueAt: (fx) =>
+              (fx.value('strength', 0.5) * fx.intensity).clamp(0.0, 1.0) * 5,
+        ),
+      ],
       buildFilters: (fx) {
         final strength =
             (fx.value('strength', 0.5) * fx.intensity).clamp(0.0, 1.0);
@@ -559,6 +707,30 @@ abstract final class EffectCatalog {
           defaultValue: 0,
         ),
       ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'brightness',
+          valueAt: (fx) => fx.value('brightness') * fx.intensity,
+        ),
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'contrast',
+          valueAt: (fx) =>
+              1 + (fx.value('contrast', 1) - 1) * fx.intensity,
+        ),
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'saturation',
+          valueAt: (fx) =>
+              1 + (fx.value('saturation', 1) - 1) * fx.intensity,
+        ),
+        EffectCommandBinding(
+          filter: 'eq',
+          parameter: 'gamma',
+          valueAt: (fx) => 1 + (fx.value('gamma', 1) - 1) * fx.intensity,
+        ),
+      ],
       buildFilters: (fx) {
         final mix = fx.intensity;
         final brightness = fx.value('brightness') * mix;
@@ -617,6 +789,18 @@ abstract final class EffectCatalog {
           min: 0,
           max: 1,
           defaultValue: 0.1,
+        ),
+      ],
+      commands: [
+        EffectCommandBinding(
+          filter: 'chromakey',
+          parameter: 'similarity',
+          valueAt: (fx) => fx.value('similarity', 0.3),
+        ),
+        EffectCommandBinding(
+          filter: 'chromakey',
+          parameter: 'blend',
+          valueAt: (fx) => fx.value('blend', 0.1),
         ),
       ],
       buildFilters: (fx) {

@@ -8,6 +8,8 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import 'effect_automation.dart';
+
 /// A file fed to FFmpeg with `-i`, plus the input-specific flags that must
 /// precede it (`-loop`, `-framerate`, `-ss`).
 @immutable
@@ -93,6 +95,7 @@ class RenderPlan {
     required this.fps,
     this.rasterSteps = const [],
     this.preRenderSteps = const [],
+    this.commandScripts = const [],
     this.videoOutLabel,
     this.audioOutLabel,
     this.warnings = const [],
@@ -114,6 +117,11 @@ class RenderPlan {
 
   final List<RasterStep> rasterSteps;
   final List<PreRenderStep> preRenderSteps;
+
+  /// `sendcmd` scripts driving keyframed effect parameters. The engine writes
+  /// these to disk before the main pass; the compiler only names them, so it
+  /// stays free of I/O and therefore testable.
+  final List<CommandScript> commandScripts;
 
   /// Pad carrying the finished picture. Null when the timeline has no video.
   final String? videoOutLabel;

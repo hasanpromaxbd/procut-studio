@@ -104,6 +104,33 @@ FFmpeg (`tmix` averages real neighbouring frames) and spatial in the shader
 (the preview only has one frame). Rather than hide that, the inspector labels
 it. Honest beats invisible.
 
+### 5b. Keyframed effects are driven by `sendcmd`, and the compiler stays pure
+
+A filter's parameters are fixed when the graph is built, so an animated effect
+would render at its `t=0` value — the preview animates, the export does not.
+
+**Why this shape.** FFmpeg's `sendcmd` can retarget a downstream filter's
+parameters at given times, provided that filter advertises command support (the
+`C` flag in `ffmpeg -filters`). Each animated instance gets a label
+(`gblur@fxabc`) and a script sets it on a 10 Hz grid.
+
+Two details that are easy to get wrong and are covered by tests:
+
+* The target syntax is `filter@label`, not `label@filter`. Only a real ffmpeg
+  run reveals this, which is what `tool/verify_sendcmd.sh` exists for.
+* An effect ramping up *from* zero emits **no filter at all** at `t=0` — the
+  emitter correctly no-ops — leaving nothing for the commands to address. So
+  animated effects are built at their animation's *peak* and immediately
+  overwritten by the `t=0` command.
+
+**Cost.** Three filters (`unsharp`, `noise`, `vignette`) have no command
+support, so Sharpen, Film grain and Vignette export at their first-frame value.
+The compiler emits an export warning rather than flattening them silently.
+
+The compiler stays pure: it returns the script *text* in `RenderPlan`, and
+`ExportEngine` writes it. That is what keeps the whole export path testable
+without a filesystem.
+
 ### 6. Text and stickers are rasterised by Flutter, not `drawtext`
 
 The exporter runs `LayerPainter` — the *same* painter the preview uses — into a

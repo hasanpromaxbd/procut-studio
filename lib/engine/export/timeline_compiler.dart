@@ -39,6 +39,7 @@ import '../effects/effect_catalog.dart';
 import '../ffmpeg/filter_graph.dart';
 import '../ffmpeg/hardware_encoder.dart';
 import '../transitions/transition_catalog.dart';
+import 'effect_automation.dart';
 import 'render_plan.dart';
 
 class TimelineCompiler {
@@ -68,6 +69,7 @@ class TimelineCompiler {
     final inputs = <RenderInput>[];
     final rasterSteps = <RasterStep>[];
     final preRenderSteps = <PreRenderStep>[];
+    final commandScripts = <CommandScript>[];
 
     // Asset path → input index. One `-i` per distinct file no matter how many
     // clips use it; FFmpeg demuxes it once and the trims split it out.
@@ -111,6 +113,7 @@ class TimelineCompiler {
         registerInput: registerInput,
         rasterSteps: rasterSteps,
         preRenderSteps: preRenderSteps,
+        commandScripts: commandScripts,
         warnings: warnings,
         preferFastTransitions: preferFastTransitions,
       );
@@ -190,6 +193,7 @@ class TimelineCompiler {
       fps: fps,
       rasterSteps: rasterSteps,
       preRenderSteps: preRenderSteps,
+      commandScripts: commandScripts,
       videoOutLabel: videoOut,
       audioOutLabel: audioOut,
       warnings: warnings,
@@ -215,6 +219,7 @@ class TimelineCompiler {
     required int Function(String key, RenderInput input) registerInput,
     required List<RasterStep> rasterSteps,
     required List<PreRenderStep> preRenderSteps,
+    required List<CommandScript> commandScripts,
     required List<String> warnings,
     required bool preferFastTransitions,
   }) {
@@ -257,6 +262,7 @@ class TimelineCompiler {
         registerInput: registerInput,
         rasterSteps: rasterSteps,
         preRenderSteps: preRenderSteps,
+        commandScripts: commandScripts,
         warnings: warnings,
       );
       if (segment == null) continue;
@@ -369,6 +375,7 @@ class TimelineCompiler {
     required int Function(String key, RenderInput input) registerInput,
     required List<RasterStep> rasterSteps,
     required List<PreRenderStep> preRenderSteps,
+    required List<CommandScript> commandScripts,
     required List<String> warnings,
   }) {
     final label = graph.newLabel('seg');
@@ -426,7 +433,11 @@ class TimelineCompiler {
 
         chain.then(Filters.fps(fps));
         _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
-        _appendEffects(chain, clip);
+        _collectAutomation(
+          _appendEffects(chain, clip, workspaceDir),
+          commandScripts,
+          warnings,
+        );
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
         _appendOpacity(chain, clip.transform);
 
@@ -459,7 +470,11 @@ class TimelineCompiler {
         final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
         chain.then(Filters.fps(fps));
         _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
-        _appendEffects(chain, clip);
+        _collectAutomation(
+          _appendEffects(chain, clip, workspaceDir),
+          commandScripts,
+          warnings,
+        );
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
         _appendOpacity(chain, clip.transform);
 
@@ -625,11 +640,68 @@ class TimelineCompiler {
     chain.thenAll(Filters.scaleToFit(outWidth, outHeight));
   }
 
-  void _appendEffects(FilterChain chain, Clip clip) {
-    final resolved = clip.activeEffects
-        .map((e) => e.resolveAt(Duration.zero))
+  /// Appends the clip's effect filters, wiring up `sendcmd` automation when
+  /// any of them are keyframed.
+  EffectAutomation _appendEffects(
+    FilterChain chain,
+    Clip clip,
+    String workspaceDir,
+  ) {
+    final effects = clip.activeEffects;
+    if (effects.isEmpty) {
+      return const EffectAutomation(script: null, staticEffectTypes: []);
+    }
+
+    // Animated effects are built at their peak so the filter instance survives
+    // into the graph — see EffectAutomationCompiler.representativeResolution.
+    final resolved = effects
+        .map(
+          (e) => e.isAnimated
+              ? EffectAutomationCompiler.representativeResolution(
+                  e,
+                  clip.duration,
+                )
+              : e.resolveAt(Duration.zero),
+        )
         .toList();
-    chain.thenAll(EffectCatalog.buildChain(resolved));
+
+    final filters = EffectCatalog.buildChain(resolved);
+
+    final automation = EffectAutomationCompiler.compile(
+      clip: clip,
+      scriptPath: p.join(workspaceDir, 'fx_${clip.id}.cmd'),
+    );
+
+    if (automation.hasScript) {
+      EffectAutomationCompiler.applyLabels(filters, effects);
+      // `sendcmd` only reaches filters downstream of it in the same chain.
+      chain.then(
+        Filter('sendcmd', {
+          'f': FilterGraph.escapePath(automation.script!.path),
+        }),
+      );
+    }
+
+    chain.thenAll(filters);
+    return automation;
+  }
+
+  /// Files the generated script and warns about effects that could not be
+  /// animated on export.
+  void _collectAutomation(
+    EffectAutomation automation,
+    List<CommandScript> scripts,
+    List<String> warnings,
+  ) {
+    if (automation.hasScript) scripts.add(automation.script!);
+
+    for (final type in automation.staticEffectTypes) {
+      final label = EffectCatalog.specFor(type)?.label ?? type.id;
+      final warning =
+          '"$label" is keyframed, but its FFmpeg filter cannot be changed '
+          'mid-render — it will export at its first-frame value.';
+      if (!warnings.contains(warning)) warnings.add(warning);
+    }
   }
 
   void _appendOpacity(FilterChain chain, Transform2D transform) {

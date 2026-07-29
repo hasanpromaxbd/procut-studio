@@ -227,6 +227,26 @@ class ExportEngine implements ExportRepository {
         }
       }
 
+      // ── Write effect-automation scripts ────────────────────────────
+      // Small and fast, so they are not a progress phase of their own. The
+      // compiler produced the text; writing is deliberately kept out of it so
+      // the compiler stays pure and unit-testable.
+      for (final script in plan.commandScripts) {
+        await File(script.path).writeAsString(script.contents, flush: true);
+      }
+      if (plan.commandScripts.isNotEmpty) {
+        _log.d(
+          'effect automation written',
+          fields: {
+            'scripts': plan.commandScripts.length,
+            'commands': plan.commandScripts.fold<int>(
+              0,
+              (sum, s) => sum + s.commandCount,
+            ),
+          },
+        );
+      }
+
       // ── Phase 3: main encode ───────────────────────────────────────
       final encodeStart = _rasterShare + preShare;
       yield progress = progress.copyWith(
@@ -275,6 +295,10 @@ class ExportEngine implements ExportRepository {
             encoder: encoder,
             encoderProbe: _encoderProbe,
           );
+          // Paths are deterministic, so this rewrites the same files.
+          for (final script in plan.commandScripts) {
+            await File(script.path).writeAsString(script.contents, flush: true);
+          }
           result = await _runMainPass(
             plan: plan,
             jobId: jobId,
