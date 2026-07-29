@@ -18,6 +18,17 @@ class SpeedSheet extends ConsumerWidget {
 
   static const List<double> _presets = [0.1, 0.25, 0.5, 1, 2, 4, 10];
 
+  /// Control points as (position through the clip, rate). Named for what they
+  /// look like on screen, not for the maths.
+  static const Map<String, List<(double, double)>> _ramps = {
+    'Ease in': [(0.0, 0.3), (0.35, 1.0), (1.0, 1.0)],
+    'Ease out': [(0.0, 1.0), (0.65, 1.0), (1.0, 0.3)],
+    'Slow middle': [(0.0, 1.6), (0.5, 0.35), (1.0, 1.6)],
+    'Fast middle': [(0.0, 0.5), (0.5, 2.5), (1.0, 0.5)],
+    'Bullet time': [(0.0, 1.0), (0.4, 0.15), (0.6, 0.15), (1.0, 1.0)],
+    'Speed up': [(0.0, 0.5), (1.0, 3.0)],
+  };
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final editor = ref.watch(editorControllerProvider(projectId));
@@ -114,6 +125,44 @@ class SpeedSheet extends ConsumerWidget {
                 ),
               ),
             ),
+          const SectionHeader(title: 'Speed ramp'),
+          Text(
+            'A ramp varies the rate across the clip. The clip is re-timed to '
+            'consume the same source material, so the cut after it moves.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: Spacing.sm),
+          Wrap(
+            spacing: Spacing.sm,
+            runSpacing: Spacing.sm,
+            children: [
+              for (final ramp in _ramps.entries)
+                ActionChip(
+                  label: Text(ramp.key),
+                  onPressed: () => controller.setSpeedRamp(ramp.value),
+                ),
+              if (clip.hasSpeedRamp)
+                ActionChip(
+                  avatar: const Icon(Icons.close_rounded, size: 15),
+                  label: const Text('Clear ramp'),
+                  onPressed: () => controller.setSpeedRamp(const []),
+                ),
+            ],
+          ),
+          if (clip.hasSpeedRamp)
+            Padding(
+              padding: const EdgeInsets.only(top: Spacing.sm),
+              child: Text(
+                'Rendered as stepped segments — FFmpeg cannot express a '
+                'continuous ramp, so a very long one may show slight stepping.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.tertiary,
+                ),
+              ),
+            ),
+
           if (clip is VideoClip) ...[
             const SectionHeader(title: 'Freeze frame'),
             OutlinedButton.icon(

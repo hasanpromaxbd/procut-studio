@@ -11,6 +11,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/utils/math_utils.dart';
 import '../../core/utils/time_utils.dart';
 import 'clip.dart';
+import 'marker.dart';
 import 'track.dart';
 
 /// Canvas shape presets offered when creating a project.
@@ -43,6 +44,7 @@ class Timeline {
     this.height = AppConstants.defaultHeight,
     this.backgroundColor = 0xFF000000,
     this.aspectPreset = AspectPreset.vertical9x16,
+    this.markers = const [],
   });
 
   final List<Track> tracks;
@@ -57,6 +59,16 @@ class Timeline {
   final int backgroundColor;
 
   final AspectPreset aspectPreset;
+
+  /// Navigation points. Never rendered; they are snap targets, jump
+  /// destinations and the chapter list.
+  final List<Marker> markers;
+
+  /// Markers worth listing, newest structure first. Beat markers arrive in the
+  /// hundreds and are excluded — they are ticks, not chapters.
+  List<Marker> get chapterMarkers =>
+      markers.where((m) => !m.isDense).toList()
+        ..sort((a, b) => a.time.compareTo(b.time));
 
   /// End of the last clip on any track.
   Duration get duration {
@@ -147,6 +159,10 @@ class Timeline {
         points.add(clip.end.inMicroseconds);
       }
     }
+    // Markers are edit points too: "jump to next" should land on them.
+    for (final marker in markers) {
+      points.add(marker.time.inMicroseconds);
+    }
     final sorted = points.toList()..sort();
     return sorted.map((us) => Duration(microseconds: us)).toList();
   }
@@ -212,6 +228,7 @@ class Timeline {
     int? height,
     int? backgroundColor,
     AspectPreset? aspectPreset,
+    List<Marker>? markers,
   }) => Timeline(
     tracks: tracks ?? this.tracks,
     fps: fps ?? this.fps,
@@ -219,6 +236,7 @@ class Timeline {
     height: height ?? this.height,
     backgroundColor: backgroundColor ?? this.backgroundColor,
     aspectPreset: aspectPreset ?? this.aspectPreset,
+    markers: markers ?? this.markers,
   );
 
   Map<String, dynamic> toJson() => {
@@ -228,6 +246,8 @@ class Timeline {
     'h': height,
     'bg': backgroundColor,
     'aspect': aspectPreset.label,
+    if (markers.isNotEmpty)
+      'markers': markers.map((m) => m.toJson()).toList(),
   };
 
   factory Timeline.fromJson(Map<String, dynamic> json) => Timeline(
@@ -239,6 +259,9 @@ class Timeline {
     height: (json['h'] as num?)?.toInt() ?? AppConstants.defaultHeight,
     backgroundColor: (json['bg'] as num?)?.toInt() ?? 0xFF000000,
     aspectPreset: AspectPreset.fromLabel(json['aspect'] as String?),
+    markers: ((json['markers'] as List?) ?? const [])
+        .map((e) => Marker.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(),
   );
 
   @override

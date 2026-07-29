@@ -18,6 +18,7 @@ import '../../../core/services/permission_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_utils.dart';
+import '../../../domain/entities/timeline.dart';
 import '../../../domain/entities/track.dart';
 import '../../../engine/timeline/playback_clock.dart';
 import '../../viewmodels/editor_controller.dart';
@@ -30,6 +31,7 @@ import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
+import 'sheets/mask_sheet.dart';
 import 'sheets/record_sheet.dart';
 import 'sheets/speed_sheet.dart';
 import 'sheets/text_sheet.dart';
@@ -234,6 +236,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
               : 'Redo ${editor.redoLabel}',
           onPressed: editor.canRedo ? controller.redo : null,
         ),
+        IconButton(
+          icon: const Icon(Icons.aspect_ratio_rounded),
+          tooltip: 'Reframe for another aspect',
+          onPressed: _reframe,
+        ),
         Padding(
           padding: const EdgeInsets.only(right: Spacing.sm, left: Spacing.xs),
           child: FilledButton.icon(
@@ -255,6 +262,46 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         ),
       ],
     );
+  }
+
+  /// Converts the project to another aspect ratio, recentring every clip.
+  ///
+  /// Without tracking data this centres rather than follows a subject — still
+  /// better than the letterboxing a bare canvas change would produce, and the
+  /// sheet says so rather than implying it is smart.
+  Future<void> _reframe() async {
+    final preset = await showModalBottomSheet<AspectPreset>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(Spacing.lg),
+              child: Text(
+                'Reframe the whole project. Every clip is recentred for the new '
+                'shape; run face tracking first if you want it to follow a '
+                'subject.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            for (final option in AspectPreset.values)
+              if (option != AspectPreset.custom)
+                ListTile(
+                  leading: const Icon(Icons.crop_rounded),
+                  title: Text(option.label),
+                  subtitle: Text('${option.width} × ${option.height}'),
+                  onTap: () => Navigator.pop(context, option),
+                ),
+          ],
+        ),
+      ),
+    );
+    if (preset == null || !mounted) return;
+    ref
+        .read(editorControllerProvider(widget.projectId).notifier)
+        .autoReframe(preset);
   }
 
   Future<void> _renameProject(String current) async {
@@ -342,6 +389,23 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: AiToolsSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.mask:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: MaskSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.marker:
+        controller.addMarkerAtPlayhead();
+        await HapticFeedback.selectionClick();
+
+      case _ToolAction.copy:
+        controller.copySelection();
+
+      case _ToolAction.paste:
+        controller.paste();
+
       case _ToolAction.rotate:
         controller.rotateSelected();
 
@@ -355,7 +419,44 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         controller.reverseSelected();
 
       case _ToolAction.addTrack:
-        controller.addTrack(TrackType.overlay);
+        if (!mounted) return;
+        final type = await showModalBottomSheet<TrackType>(
+          context: context,
+          useSafeArea: true,
+          builder: (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final option in [
+                  TrackType.overlay,
+                  TrackType.video,
+                  TrackType.audio,
+                  TrackType.text,
+                  TrackType.adjustment,
+                ])
+                  ListTile(
+                    leading: Icon(
+                      switch (option) {
+                        TrackType.adjustment => Icons.tune_rounded,
+                        TrackType.audio => Icons.graphic_eq_rounded,
+                        TrackType.text => Icons.title_rounded,
+                        _ => Icons.layers_rounded,
+                      },
+                      color: Color(option.colorValue),
+                    ),
+                    title: Text('${option.label} track'),
+                    subtitle: option == TrackType.adjustment
+                        ? const Text(
+                            'Effects here apply to every layer below it',
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(context, option),
+                  ),
+              ],
+            ),
+          ),
+        );
+        if (type != null) controller.addTrack(type);
     }
   }
 
@@ -546,6 +647,10 @@ enum _ToolAction {
   text,
   record,
   ai,
+  mask,
+  marker,
+  copy,
+  paste,
   rotate,
   flip,
   freeze,
@@ -612,6 +717,29 @@ class _ToolRail extends ConsumerWidget {
         icon: Icons.auto_awesome_rounded,
         label: 'AI',
         onPressed: () => onAction(_ToolAction.ai),
+      ),
+      ToolIconButton(
+        icon: Icons.crop_free_rounded,
+        label: 'Mask',
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.mask),
+      ),
+      ToolIconButton(
+        icon: Icons.flag_rounded,
+        label: 'Marker',
+        onPressed: () => onAction(_ToolAction.marker),
+      ),
+      ToolIconButton(
+        icon: Icons.copy_all_rounded,
+        label: 'Copy',
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.copy),
+      ),
+      ToolIconButton(
+        icon: Icons.content_paste_rounded,
+        label: 'Paste',
+        enabled: editor?.canPaste ?? false,
+        onPressed: () => onAction(_ToolAction.paste),
       ),
       ToolIconButton(
         icon: Icons.rotate_90_degrees_cw_rounded,

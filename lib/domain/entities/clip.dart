@@ -11,6 +11,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/utils/time_utils.dart';
 import 'effect.dart';
 import 'keyframe.dart';
+import 'mask.dart';
 import 'text_style_spec.dart';
 import 'transform2d.dart';
 import 'transition.dart';
@@ -41,6 +42,7 @@ sealed class Clip {
     this.transform = Transform2D.identity,
     this.effects = const [],
     this.outTransition,
+    this.mask = Mask.none,
   });
 
   final String id;
@@ -66,6 +68,9 @@ sealed class Clip {
 
   /// Transition out of this clip into the next one on the same track.
   final Transition? outTransition;
+
+  /// Shape mask. Inactive by default; costs nothing when so.
+  final Mask mask;
 
   ClipKind get kind;
 
@@ -99,6 +104,7 @@ sealed class Clip {
     List<Effect>? effects,
     Transition? outTransition,
     bool clearTransition = false,
+    Mask? mask,
   });
 
   Map<String, dynamic> toJson();
@@ -116,6 +122,7 @@ sealed class Clip {
     if (effects.isNotEmpty)
       'effects': effects.map((e) => e.toJson()).toList(),
     if (outTransition != null) 'outTransition': outTransition!.toJson(),
+    if (mask.isActive) 'mask': mask.toJson(),
   };
 
   static Clip fromJson(Map<String, dynamic> json) =>
@@ -142,6 +149,8 @@ sealed class Clip {
     EffectType.vintage ||
     EffectType.filmGrain ||
     EffectType.vignette => EffectStage.texture,
+    // Runs before everything, in its own pass.
+    EffectType.stabilise => EffectStage.color,
   };
 
   @override
@@ -162,6 +171,7 @@ sealed class MediaClip extends Clip {
     required this.assetId,
     this.sourceIn = Duration.zero,
     this.speed = 1.0,
+    this.speedCurve,
     this.reversed = false,
     super.label,
     super.locked,
@@ -169,6 +179,7 @@ sealed class MediaClip extends Clip {
     super.transform,
     super.effects,
     super.outTransition,
+    super.mask,
   });
 
   final String assetId;
@@ -177,12 +188,66 @@ sealed class MediaClip extends Clip {
   final Duration sourceIn;
 
   /// Playback rate, [AppConstants.minClipSpeed] … [AppConstants.maxClipSpeed].
+  ///
+  /// When [speedCurve] is set this is the *average* rate, kept in sync so that
+  /// anything not speed-aware still computes a sensible duration.
   final double speed;
+
+  /// Rate as a function of clip-local time — the "speed ramp".
+  ///
+  /// Null means constant [speed], which is the overwhelmingly common case and
+  /// keeps the whole ramping machinery off the hot path.
+  final AnimatableDouble? speedCurve;
 
   final bool reversed;
 
-  /// How much source material this clip consumes — timeline duration × speed.
-  Duration get sourceDuration => TimeUtils.unscale(duration, speed);
+  bool get hasSpeedRamp => speedCurve?.isAnimated ?? false;
+
+  /// Rate at a clip-local instant.
+  double speedAt(Duration local) {
+    final curve = speedCurve;
+    if (curve == null) return speed;
+    return curve
+        .valueAt(local)
+        .clamp(AppConstants.minClipSpeed, AppConstants.maxClipSpeed);
+  }
+
+  /// How much source material this clip consumes.
+  ///
+  /// For a ramp this is the integral of the rate over the clip, approximated on
+  /// a fixed grid — there is no closed form for an arbitrary eased curve, and
+  /// the grid is fine enough that the error is well under a frame.
+  Duration get sourceDuration {
+    final curve = speedCurve;
+    if (curve == null || !curve.isAnimated) {
+      return TimeUtils.unscale(duration, speed);
+    }
+    return integrateSpeed(Duration.zero, duration);
+  }
+
+  /// Source material consumed between two clip-local instants.
+  Duration integrateSpeed(Duration from, Duration to) {
+    final curve = speedCurve;
+    if (curve == null || !curve.isAnimated) {
+      return TimeUtils.unscale(to - from, speed);
+    }
+
+    const steps = 240;
+    final spanUs = (to - from).inMicroseconds;
+    if (spanUs <= 0) return Duration.zero;
+
+    final stepUs = spanUs / steps;
+    var consumedUs = 0.0;
+    for (var i = 0; i < steps; i++) {
+      // Midpoint rule: materially more accurate than left-edge sampling for
+      // the same number of steps, which matters because this drives audio sync.
+      final at = Duration(
+        microseconds: (from.inMicroseconds + stepUs * (i + 0.5)).round(),
+      );
+      consumedUs += stepUs * speedAt(at);
+    }
+    return Duration(microseconds: consumedUs.round());
+  }
 
   Duration get sourceOut => sourceIn + sourceDuration;
 
@@ -197,7 +262,7 @@ sealed class MediaClip extends Clip {
       Duration.zero,
       duration,
     );
-    final consumed = TimeUtils.unscale(local, speed);
+    final consumed = integrateSpeed(Duration.zero, local);
     return reversed ? sourceOut - consumed : sourceIn + consumed;
   }
 
@@ -206,6 +271,7 @@ sealed class MediaClip extends Clip {
     'assetId': assetId,
     'inUs': sourceIn.inMicroseconds,
     if (speed != 1.0) 'speed': speed,
+    if (speedCurve != null) 'speedCurve': speedCurve!.toJson(),
     if (reversed) 'reversed': true,
   };
 }
@@ -223,6 +289,7 @@ final class VideoClip extends MediaClip {
     required super.assetId,
     super.sourceIn,
     super.speed,
+    super.speedCurve,
     super.reversed,
     super.label,
     super.locked,
@@ -230,6 +297,7 @@ final class VideoClip extends MediaClip {
     super.transform,
     super.effects,
     super.outTransition,
+    super.mask,
     this.volume = const AnimatableDouble.constant(1),
     this.muted = false,
     this.audioFadeIn = Duration.zero,
@@ -273,6 +341,8 @@ final class VideoClip extends MediaClip {
     String? assetId,
     Duration? sourceIn,
     double? speed,
+    AnimatableDouble? speedCurve,
+    bool clearSpeedCurve = false,
     bool? reversed,
     String? label,
     bool? locked,
@@ -280,6 +350,7 @@ final class VideoClip extends MediaClip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
     AnimatableDouble? volume,
     bool? muted,
@@ -295,6 +366,8 @@ final class VideoClip extends MediaClip {
     assetId: assetId ?? this.assetId,
     sourceIn: sourceIn ?? this.sourceIn,
     speed: speed ?? this.speed,
+    speedCurve:
+        clearSpeedCurve ? null : (speedCurve ?? this.speedCurve),
     reversed: reversed ?? this.reversed,
     label: label ?? this.label,
     locked: locked ?? this.locked,
@@ -302,6 +375,7 @@ final class VideoClip extends MediaClip {
     transform: transform ?? this.transform,
     effects: effects ?? this.effects,
     outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
+    mask: mask ?? this.mask,
     volume: volume ?? this.volume,
     muted: muted ?? this.muted,
     audioFadeIn: audioFadeIn ?? this.audioFadeIn,
@@ -320,6 +394,7 @@ final class VideoClip extends MediaClip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -332,6 +407,7 @@ final class VideoClip extends MediaClip {
     effects: effects,
     outTransition: outTransition,
     clearTransition: clearTransition,
+    mask: mask,
   );
 
   @override
@@ -352,6 +428,9 @@ final class VideoClip extends MediaClip {
     assetId: json['assetId'] as String? ?? '',
     sourceIn: Duration(microseconds: (json['inUs'] as num?)?.toInt() ?? 0),
     speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+    speedCurve: json['speedCurve'] == null
+        ? null
+        : AnimatableDouble.fromJson(json['speedCurve'], fallback: 1),
     reversed: json['reversed'] as bool? ?? false,
     label: json['label'] as String?,
     locked: json['locked'] as bool? ?? false,
@@ -361,6 +440,7 @@ final class VideoClip extends MediaClip {
     ),
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
     volume: AnimatableDouble.fromJson(json['volume'], fallback: 1),
     muted: json['muted'] as bool? ?? false,
     audioFadeIn: Duration(microseconds: (json['fadeInUs'] as num?)?.toInt() ?? 0),
@@ -384,12 +464,14 @@ final class AudioClip extends MediaClip {
     required super.assetId,
     super.sourceIn,
     super.speed,
+    super.speedCurve,
     super.reversed,
     super.label,
     super.locked,
     super.enabled,
     super.effects,
     super.outTransition,
+    super.mask,
     this.volume = const AnimatableDouble.constant(1),
     this.muted = false,
     this.fadeIn = Duration.zero,
@@ -436,12 +518,15 @@ final class AudioClip extends MediaClip {
     String? assetId,
     Duration? sourceIn,
     double? speed,
+    AnimatableDouble? speedCurve,
+    bool clearSpeedCurve = false,
     bool? reversed,
     String? label,
     bool? locked,
     bool? enabled,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
     AnimatableDouble? volume,
     bool? muted,
@@ -459,6 +544,8 @@ final class AudioClip extends MediaClip {
     assetId: assetId ?? this.assetId,
     sourceIn: sourceIn ?? this.sourceIn,
     speed: speed ?? this.speed,
+    speedCurve:
+        clearSpeedCurve ? null : (speedCurve ?? this.speedCurve),
     reversed: reversed ?? this.reversed,
     label: label ?? this.label,
     locked: locked ?? this.locked,
@@ -486,6 +573,7 @@ final class AudioClip extends MediaClip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -497,6 +585,7 @@ final class AudioClip extends MediaClip {
     effects: effects,
     outTransition: outTransition,
     clearTransition: clearTransition,
+    mask: mask,
   );
 
   @override
@@ -520,12 +609,16 @@ final class AudioClip extends MediaClip {
     assetId: json['assetId'] as String? ?? '',
     sourceIn: Duration(microseconds: (json['inUs'] as num?)?.toInt() ?? 0),
     speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+    speedCurve: json['speedCurve'] == null
+        ? null
+        : AnimatableDouble.fromJson(json['speedCurve'], fallback: 1),
     reversed: json['reversed'] as bool? ?? false,
     label: json['label'] as String?,
     locked: json['locked'] as bool? ?? false,
     enabled: !(json['off'] as bool? ?? false),
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
     volume: AnimatableDouble.fromJson(json['volume'], fallback: 1),
     muted: json['muted'] as bool? ?? false,
     fadeIn: Duration(microseconds: (json['fadeInUs'] as num?)?.toInt() ?? 0),
@@ -609,6 +702,7 @@ final class ImageClip extends MediaClip {
     super.transform,
     super.effects,
     super.outTransition,
+    super.mask,
   }) : super(sourceIn: Duration.zero, speed: 1.0, reversed: false);
 
   @override
@@ -630,6 +724,7 @@ final class ImageClip extends MediaClip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => ImageClip(
     id: id ?? this.id,
@@ -656,6 +751,7 @@ final class ImageClip extends MediaClip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -668,6 +764,7 @@ final class ImageClip extends MediaClip {
     effects: effects,
     outTransition: outTransition,
     clearTransition: clearTransition,
+    mask: mask,
   );
 
   @override
@@ -687,6 +784,7 @@ final class ImageClip extends MediaClip {
     ),
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
   );
 }
 
@@ -712,6 +810,7 @@ final class TextClip extends Clip {
     super.transform,
     super.effects,
     super.outTransition,
+    super.mask,
   });
 
   final String text;
@@ -763,6 +862,7 @@ final class TextClip extends Clip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => TextClip(
     id: id ?? this.id,
@@ -794,6 +894,7 @@ final class TextClip extends Clip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -806,6 +907,7 @@ final class TextClip extends Clip {
     effects: effects,
     outTransition: outTransition,
     clearTransition: clearTransition,
+    mask: mask,
   );
 
   @override
@@ -840,6 +942,7 @@ final class TextClip extends Clip {
     ),
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
   );
 }
 
@@ -863,6 +966,7 @@ final class StickerClip extends Clip {
     super.transform,
     super.effects,
     super.outTransition,
+    super.mask,
   });
 
   /// Catalogue id for a bundled sticker.
@@ -897,6 +1001,7 @@ final class StickerClip extends Clip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => StickerClip(
     id: id ?? this.id,
@@ -926,6 +1031,7 @@ final class StickerClip extends Clip {
     Transform2D? transform,
     List<Effect>? effects,
     Transition? outTransition,
+    Mask? mask,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -938,6 +1044,7 @@ final class StickerClip extends Clip {
     effects: effects,
     outTransition: outTransition,
     clearTransition: clearTransition,
+    mask: mask,
   );
 
   @override
@@ -966,6 +1073,7 @@ final class StickerClip extends Clip {
     ),
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
   );
 }
 

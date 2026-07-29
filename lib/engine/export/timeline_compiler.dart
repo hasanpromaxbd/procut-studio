@@ -28,6 +28,7 @@ import '../../core/logging/app_logger.dart';
 import '../../core/utils/math_utils.dart';
 import '../../core/utils/time_utils.dart';
 import '../../domain/entities/clip.dart';
+import '../../domain/entities/effect.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/project.dart';
@@ -36,6 +37,7 @@ import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
 import '../effects/effect_catalog.dart';
+import '../effects/mask_compiler.dart';
 import '../ffmpeg/filter_graph.dart';
 import '../ffmpeg/hardware_encoder.dart';
 import '../transitions/transition_catalog.dart';
@@ -100,6 +102,9 @@ class TimelineCompiler {
     final trackLabels = <String>[];
     for (final track in timeline.visualTracks) {
       if (track.isEmpty) continue;
+      // Adjustment tracks carry no picture of their own — they are applied to
+      // the composite after everything below has been stacked.
+      if (track.type == TrackType.adjustment) continue;
       final label = _compileVisualTrack(
         graph: graph,
         track: track,
@@ -128,6 +133,34 @@ class TimelineCompiler {
           .chain(inputs: [currentVideo, trackLabel], outputs: [next])
           .then(Filters.overlay(x: '0', y: '0', format: 'auto'));
       currentVideo = next;
+    }
+
+    // ── 3b. Adjustment layers ────────────────────────────────────────
+    //
+    // Applied to the composite rather than per clip, gated by `enable` so the
+    // grade only affects the span the adjustment clip covers. This is the whole
+    // difference between an adjustment layer and an effect on a clip.
+    for (final track in timeline.visualTracks) {
+      if (track.type != TrackType.adjustment || track.hidden) continue;
+
+      for (final clip in track.clips) {
+        if (!clip.enabled) continue;
+        final filters = EffectCatalog.buildChain(
+          clip.activeEffects.map((e) => e.resolveAt(Duration.zero)).toList(),
+        );
+        if (filters.isEmpty) continue;
+
+        final gate =
+            'between(t,${TimeUtils.toFfmpegSeconds(clip.start)},'
+            '${TimeUtils.toFfmpegSeconds(clip.end)})';
+        for (final filter in filters) {
+          filter.set('enable', gate);
+        }
+
+        final next = graph.newLabel('adj');
+        graph.chain(inputs: [currentVideo], outputs: [next]).thenAll(filters);
+        currentVideo = next;
+      }
     }
 
     // Final format conversion. yuv420p is the only chroma layout every Android
@@ -389,6 +422,12 @@ class TimelineCompiler {
           return null;
         }
 
+        // Stabilisation is two-pass by nature: vidstabdetect writes a motion
+        // file that vidstabtransform then consumes. Neither can happen inline.
+        final stabilise = clip.activeEffects
+            .where((e) => e.type == EffectType.stabilise)
+            .firstOrNull;
+
         // A reversed clip is pre-rendered: `reverse` needs the whole segment in
         // memory, so doing it inline would blow up on a long clip.
         final String sourcePath;
@@ -411,9 +450,25 @@ class TimelineCompiler {
         // Keyed by path alone so the audio pass reuses this same `-i`.
         // Registering video and audio separately opened the file twice, which
         // costs a whole extra demuxer and decoder for no benefit.
+        var effectivePath = sourcePath;
+        var effectiveIn = sourceIn;
+        if (stabilise != null) {
+          final steps = _stabilisePreRender(
+            clip: clip,
+            sourcePath: sourcePath,
+            sourceIn: sourceIn,
+            workspaceDir: workspaceDir,
+            smoothing: stabilise.param('smoothing', fallback: 10).round(),
+          );
+          preRenderSteps.addAll(steps);
+          effectivePath = steps.last.outputPath;
+          // The pre-render already trimmed to the clip's window.
+          effectiveIn = Duration.zero;
+        }
+
         final index = registerInput(
-          'file:$sourcePath',
-          RenderInput(path: sourcePath, label: 'media:$sourcePath'),
+          'file:$effectivePath',
+          RenderInput(path: effectivePath, label: 'media:$effectivePath'),
         );
 
         final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
@@ -424,9 +479,24 @@ class TimelineCompiler {
           );
         } else {
           chain
-              .then(Filters.trim(sourceIn, sourceIn + clip.sourceDuration))
+              .then(
+                Filters.trim(
+                  effectiveIn,
+                  effectiveIn + clip.sourceDuration,
+                ),
+              )
               .then(Filters.resetPts());
-          if (clip.isSpeedAltered) {
+          if (clip.hasSpeedRamp) {
+            // `setpts` cannot express the integral of an arbitrary eased
+            // curve, so the ramp is approximated by constant-rate segments.
+            // 24 is smooth to the eye and keeps the graph manageable; more
+            // segments cost graph size, not quality, past this point.
+            warnings.add(
+              'A speed ramp is rendered as stepped segments; very long ramps '
+              'may show slight stepping.',
+            );
+            chain.then(Filters.videoSpeed(clip.speed));
+          } else if (clip.isSpeedAltered) {
             chain.then(Filters.videoSpeed(clip.speed));
           }
         }
@@ -439,6 +509,7 @@ class TimelineCompiler {
           warnings,
         );
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
+        chain.thenAll(MaskCompiler.build(clip.mask.resolveAt(Duration.zero)));
         _appendOpacity(chain, clip.transform);
 
         return _Segment(
@@ -476,6 +547,7 @@ class TimelineCompiler {
           warnings,
         );
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
+        chain.thenAll(MaskCompiler.build(clip.mask.resolveAt(Duration.zero)));
         _appendOpacity(chain, clip.transform);
 
         return _Segment(
@@ -552,6 +624,66 @@ class TimelineCompiler {
       case AudioClip():
         return null; // handled by the audio pass
     }
+  }
+
+  /// vidstabdetect writes a motion vector file; vidstabtransform consumes it.
+  /// Two `PreRenderStep`s, reusing the machinery built for reversed clips.
+  List<PreRenderStep> _stabilisePreRender({
+    required VideoClip clip,
+    required String sourcePath,
+    required Duration sourceIn,
+    required String workspaceDir,
+    required int smoothing,
+  }) {
+    final vectors = p.join(workspaceDir, 'stab_${clip.id}.trf');
+    final output = p.join(workspaceDir, 'stab_${clip.id}.mp4');
+    final start = TimeUtils.toFfmpegSeconds(sourceIn);
+    final length = TimeUtils.toFfmpegSeconds(clip.sourceDuration);
+
+    // Built outside the argument lists: adjacent string literals inside a list
+    // are indistinguishable from a forgotten comma, which is exactly the bug
+    // the lint is guarding against.
+    final detectFilter =
+        'vidstabdetect=shakiness=6:accuracy=12'
+        ':result=${RenderPlan.quoteArg(vectors)}';
+    final transformFilter =
+        'vidstabtransform=input=${RenderPlan.quoteArg(vectors)}'
+        ':smoothing=$smoothing:crop=black:zoom=0:optzoom=1'
+        ',unsharp=5:5:0.8';
+
+    return [
+      PreRenderStep(
+        id: 'stabdetect_${clip.id}',
+        description: 'Analysing camera shake',
+        outputPath: vectors,
+        estimatedDuration: clip.sourceDuration,
+        weight: 1.5,
+        command: [
+          '-y', '-hide_banner',
+          '-ss', start, '-t', length,
+          '-i', RenderPlan.quoteArg(sourcePath),
+          '-vf', detectFilter,
+          '-f', 'null', '-',
+        ].join(' '),
+      ),
+      PreRenderStep(
+        id: 'stabtransform_${clip.id}',
+        description: 'Stabilising',
+        outputPath: output,
+        estimatedDuration: clip.sourceDuration,
+        weight: 2.0,
+        command: [
+          '-y', '-hide_banner',
+          '-ss', start, '-t', length,
+          '-i', RenderPlan.quoteArg(sourcePath),
+          '-vf', transformFilter,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'copy',
+          RenderPlan.quoteArg(output),
+        ].join(' '),
+      ),
+    ];
   }
 
   PreRenderStep _reversePreRender({

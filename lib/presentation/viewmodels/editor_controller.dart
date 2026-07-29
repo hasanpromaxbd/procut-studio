@@ -19,6 +19,8 @@ import '../../core/utils/id_generator.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/keyframe.dart';
+import '../../domain/entities/marker.dart';
+import '../../domain/entities/mask.dart';
 import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/subtitle.dart';
 import '../../domain/entities/text_style_spec.dart';
@@ -26,6 +28,7 @@ import '../../domain/entities/timeline.dart';
 import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
+import '../../domain/repositories/ai_repository.dart';
 import '../../domain/repositories/media_repository.dart';
 import '../../domain/repositories/project_repository.dart';
 import '../../domain/usecases/timeline_operations.dart';
@@ -126,10 +129,10 @@ class EditorController extends Notifier<EditorState?> {
         UndoEntry(
           timeline: current.timeline,
           label: entry.label,
-          selectedClipId: current.selectedClipId,
+          selectedClipIds: current.selectedClipIds,
         ),
       ],
-      selectedClipId: entry.selectedClipId,
+      selectedClipIds: entry.selectedClipIds,
       isDirty: true,
       clearMessages: true,
     );
@@ -150,10 +153,10 @@ class EditorController extends Notifier<EditorState?> {
         UndoEntry(
           timeline: current.timeline,
           label: entry.label,
-          selectedClipId: current.selectedClipId,
+          selectedClipIds: current.selectedClipIds,
         ),
       ],
-      selectedClipId: entry.selectedClipId,
+      selectedClipIds: entry.selectedClipIds,
       isDirty: true,
       clearMessages: true,
     );
@@ -163,12 +166,328 @@ class EditorController extends Notifier<EditorState?> {
 
   // ── Selection ────────────────────────────────────────────────────────
 
+  /// Replaces the selection. Pass null to clear.
   void select(String? clipId, {String? trackId}) {
     final current = state;
     if (current == null) return;
     state = clipId == null
         ? current.copyWith(clearSelection: true)
-        : current.copyWith(selectedClipId: clipId, selectedTrackId: trackId);
+        : current.copyWith(
+            selectedClipIds: {clipId},
+            selectedTrackId: trackId,
+          );
+  }
+
+  /// Adds or removes one clip from the selection — the long-press / modifier
+  /// gesture.
+  void toggleSelection(String clipId, {String? trackId}) {
+    final current = state;
+    if (current == null) return;
+
+    final next = Set<String>.of(current.selectedClipIds);
+    if (!next.remove(clipId)) next.add(clipId);
+
+    state = next.isEmpty
+        ? current.copyWith(clearSelection: true)
+        : current.copyWith(selectedClipIds: next, selectedTrackId: trackId);
+  }
+
+  /// Selects every clip on a track, or the whole timeline when [trackId] is
+  /// null.
+  void selectAll({String? trackId}) {
+    final current = state;
+    if (current == null) return;
+
+    final ids = <String>{};
+    for (final track in current.timeline.tracks) {
+      if (trackId != null && track.id != trackId) continue;
+      for (final clip in track.clips) {
+        ids.add(clip.id);
+      }
+    }
+    if (ids.isEmpty) return;
+    state = current.copyWith(selectedClipIds: ids, selectedTrackId: trackId);
+  }
+
+  // ── Clipboard ────────────────────────────────────────────────────────
+
+  void copySelection() {
+    final current = state;
+    if (current == null || !current.hasSelection) return;
+
+    final clips = current.selectedClips;
+    if (clips.isEmpty) return;
+
+    state = current.copyWith(
+      clipboard: clips,
+      statusMessage: '${clips.length} clip(s) copied',
+    );
+  }
+
+  void cutSelection() {
+    final current = state;
+    if (current == null || !current.hasSelection) return;
+
+    final clips = current.selectedClips;
+    if (clips.isEmpty) return;
+
+    final result = TimelineOperations.deleteMany(
+      current.timeline,
+      current.selectedClipIds,
+    );
+    _apply(result, 'cut');
+    state = state?.copyWith(clipboard: clips, clearSelection: true);
+  }
+
+  /// Pastes at the playhead, preserving the relative spacing of the copy.
+  void paste() {
+    final current = state;
+    if (current == null || !current.canPaste) return;
+
+    final at = ref.read(playheadControllerProvider).position;
+    _apply(
+      TimelineOperations.paste(current.timeline, current.clipboard, at),
+      'paste',
+    );
+  }
+
+  // ── Markers ──────────────────────────────────────────────────────────
+
+  void addMarkerAtPlayhead({String label = '', MarkerKind kind = MarkerKind.note}) {
+    final current = state;
+    if (current == null) return;
+    final at = ref.read(playheadControllerProvider).position;
+    _apply(
+      TimelineOperations.addMarker(
+        current.timeline,
+        at,
+        label: label,
+        kind: kind,
+      ),
+      'add marker',
+    );
+  }
+
+  void removeMarker(String markerId) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.removeMarker(current.timeline, markerId),
+      'remove marker',
+    );
+  }
+
+  void renameMarker(String markerId, String label) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.renameMarker(current.timeline, markerId, label),
+      'rename marker',
+    );
+  }
+
+  /// Detects beats on the selected audio clip and drops a marker on each.
+  Future<void> markBeats() async {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+
+    final found = current.timeline.findClip(clipId);
+    final clip = found?.$2;
+    if (clip is! MediaClip) return;
+    final asset = current.project.asset(clip.assetId);
+    if (asset == null) return;
+
+    state = current.copyWith(isBusy: true, busyMessage: 'Finding the beat');
+    final result = await _media.detectBeats(asset);
+
+    final latest = state;
+    if (latest == null) return;
+
+    result.fold(
+      (beats) {
+        // Beats come back in source time; shift them onto the clip's position.
+        final onTimeline = beats
+            .map((b) => clip.start + b)
+            .where((t) => t >= clip.start && t < clip.end)
+            .toList();
+        state = latest.copyWith(isBusy: false);
+        _apply(
+          TimelineOperations.setBeatMarkers(latest.timeline, onTimeline),
+          'mark beats',
+        );
+        state = state?.copyWith(
+          statusMessage: '${onTimeline.length} beat markers added',
+        );
+      },
+      (failure) => state = latest.copyWith(
+        isBusy: false,
+        errorMessage: failure.message,
+      ),
+    );
+  }
+
+  // ── Masking ──────────────────────────────────────────────────────────
+
+  void setMask(Mask mask) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+    _apply(TimelineOperations.setMask(current.timeline, clipId, mask), 'mask');
+  }
+
+  // ── Speed ramping ────────────────────────────────────────────────────
+
+  /// Installs a speed ramp built from control points, as `(fraction, rate)`.
+  void setSpeedRamp(List<(double, double)> points) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+
+    final found = current.timeline.findClip(clipId);
+    final clip = found?.$2;
+    if (clip is! MediaClip) return;
+
+    if (points.isEmpty) {
+      _apply(
+        TimelineOperations.setSpeedCurve(current.timeline, clipId, null),
+        'clear ramp',
+      );
+      return;
+    }
+
+    var curve = const AnimatableDouble(1.0);
+    for (final (fraction, rate) in points) {
+      curve = curve.withKeyframe(
+        Keyframe(
+          time: Duration(
+            microseconds:
+                (clip.duration.inMicroseconds * fraction.clamp(0.0, 1.0)).round(),
+          ),
+          value: rate,
+        ),
+      );
+    }
+
+    _apply(
+      TimelineOperations.setSpeedCurve(current.timeline, clipId, curve),
+      'speed ramp',
+    );
+  }
+
+  // ── Motion tracking ──────────────────────────────────────────────────
+
+  /// Attaches the selected clip to a tracked path, by converting the tracked
+  /// points into position keyframes.
+  ///
+  /// This is exactly what the keyframe model exists for — tracking output is
+  /// just an animation curve someone else computed.
+  void applyTracking(TrackingResult tracking, {String? clipId}) {
+    final current = state;
+    final target = clipId ?? current?.selectedClipId;
+    if (current == null || target == null || tracking.isEmpty) return;
+
+    final found = current.timeline.findClip(target);
+    if (found == null) return;
+    final clip = found.$2;
+
+    var x = const AnimatableDouble(0);
+    var y = const AnimatableDouble(0);
+
+    for (final point in tracking.points) {
+      final local = point.time;
+      if (local < Duration.zero || local > clip.duration) continue;
+      // Tracker reports 0..1 of the frame; the transform works in offsets from
+      // centre, so recentre here rather than making every consumer do it.
+      x = x.withKeyframe(
+        Keyframe(time: local, value: point.x - 0.5, easing: Easing.linear),
+      );
+      y = y.withKeyframe(
+        Keyframe(time: local, value: point.y - 0.5, easing: Easing.linear),
+      );
+    }
+
+    if (x.keyframes.isEmpty) {
+      state = current.copyWith(
+        errorMessage: 'The tracked path does not overlap this clip.',
+      );
+      return;
+    }
+
+    final updated = clip.copyWithBase(
+      transform: clip.transform.copyWith(x: x, y: y),
+    );
+    _apply(
+      Result.ok(current.timeline.replaceTrack(found.$1.replaceClip(updated))),
+      'attach to track',
+    );
+    state = state?.copyWith(
+      statusMessage: '${x.keyframes.length} tracking keyframes applied',
+    );
+  }
+
+  // ── Auto-reframe ─────────────────────────────────────────────────────
+
+  /// Converts the project to a new aspect ratio, keyframing each clip's
+  /// position to keep [focus] centred.
+  ///
+  /// With no tracking data every clip is simply centred, which is still better
+  /// than the letterboxing a bare canvas change would give.
+  void autoReframe(
+    AspectPreset preset, {
+    Map<String, TrackingResult> focus = const {},
+  }) {
+    final current = state;
+    if (current == null) return;
+
+    var timeline = current.timeline.copyWith(
+      width: preset.width,
+      height: preset.height,
+      aspectPreset: preset,
+    );
+
+    for (final track in timeline.tracks) {
+      if (!track.type.isVisual) continue;
+
+      final reframed = <Clip>[];
+      for (final clip in track.clips) {
+        final path = focus[clip.id];
+        if (path == null || path.isEmpty) {
+          // No subject to follow: centre it and let the fit handle the rest.
+          reframed.add(
+            clip.copyWithBase(
+              transform: clip.transform.copyWith(
+                x: const AnimatableDouble.constant(0),
+                y: const AnimatableDouble.constant(0),
+              ),
+            ),
+          );
+          continue;
+        }
+
+        var x = const AnimatableDouble(0);
+        var y = const AnimatableDouble(0);
+        for (final point in path.points) {
+          if (point.time < Duration.zero || point.time > clip.duration) continue;
+          // Move the frame *opposite* the subject so the subject lands centre.
+          x = x.withKeyframe(
+            Keyframe(time: point.time, value: 0.5 - point.x, easing: Easing.linear),
+          );
+          y = y.withKeyframe(
+            Keyframe(time: point.time, value: 0.5 - point.y, easing: Easing.linear),
+          );
+        }
+
+        reframed.add(
+          clip.copyWithBase(
+            transform: clip.transform.copyWith(x: x, y: y),
+          ),
+        );
+      }
+      timeline = timeline.replaceTrack(track.withClips(reframed));
+    }
+
+    _apply(Result.ok(timeline), 'auto-reframe');
   }
 
   void setTool(EditorTool tool) {
@@ -283,11 +602,16 @@ class EditorController extends Notifier<EditorState?> {
 
   void deleteSelected({bool ripple = false}) {
     final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
+    if (current == null || !current.hasSelection) return;
     _apply(
-      TimelineOperations.delete(current.timeline, clipId, ripple: ripple),
-      'delete',
+      TimelineOperations.deleteMany(
+        current.timeline,
+        current.selectedClipIds,
+        ripple: ripple,
+      ),
+      current.hasMultipleSelected
+          ? 'delete ${current.selectedClipIds.length} clips'
+          : 'delete',
     );
     state = state?.copyWith(clearSelection: true);
   }
@@ -627,7 +951,10 @@ class EditorController extends Notifier<EditorState?> {
       TimelineOperations.insertClip(timeline, track.id, clip, at: start),
       'add text',
     );
-    state = state?.copyWith(selectedClipId: clip.id, selectedTrackId: track.id);
+    state = state?.copyWith(
+      selectedClipIds: {clip.id},
+      selectedTrackId: track.id,
+    );
   }
 
   void updateTextClip(String clipId, {String? text, TextStyleSpec? style,

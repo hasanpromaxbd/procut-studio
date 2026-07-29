@@ -178,6 +178,11 @@ abstract final class ShaderUniforms {
         // Handled with a ColorFilter/ColorMatrix rather than a shader — far
         // cheaper, and Skia can fold it into the existing paint.
         return false;
+
+      case EffectType.stabilise:
+        // Two-pass, lifted into its own render pass. The preview shows the
+        // unstabilised footage and the inspector says so.
+        return false;
     }
   }
 

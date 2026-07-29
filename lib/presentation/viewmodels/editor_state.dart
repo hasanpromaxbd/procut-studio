@@ -9,6 +9,7 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../domain/entities/clip.dart';
 import '../../domain/entities/project.dart';
 import '../../domain/entities/timeline.dart';
 
@@ -17,13 +18,20 @@ import '../../domain/entities/timeline.dart';
 /// costs a handful of pointers, not a deep copy.
 @immutable
 class UndoEntry {
-  const UndoEntry({required this.timeline, required this.label, this.selectedClipId});
+  const UndoEntry({
+    required this.timeline,
+    required this.label,
+    this.selectedClipIds = const {},
+  });
 
   final Timeline timeline;
 
   /// Shown in the undo tooltip — "Undo split" beats "Undo".
   final String label;
-  final String? selectedClipId;
+
+  /// Restoring the selection with the timeline is what makes undo feel like
+  /// stepping back rather than teleporting.
+  final Set<String> selectedClipIds;
 }
 
 enum EditorTool {
@@ -42,8 +50,9 @@ enum EditorTool {
 class EditorState {
   const EditorState({
     required this.project,
-    this.selectedClipId,
+    this.selectedClipIds = const {},
     this.selectedTrackId,
+    this.clipboard = const [],
     this.activeTool = EditorTool.select,
     this.undoStack = const [],
     this.redoStack = const [],
@@ -56,8 +65,27 @@ class EditorState {
   });
 
   final Project project;
-  final String? selectedClipId;
+
+  /// Selected clips. A set rather than one id because every structural edit
+  /// (delete, move, effects) reads better applied to a selection than looped
+  /// over by the caller.
+  final Set<String> selectedClipIds;
+
+  /// The primary selection — the one the inspector edits. Multi-select acts on
+  /// the whole set; single-clip panels act on this.
+  String? get selectedClipId =>
+      selectedClipIds.isEmpty ? null : selectedClipIds.first;
+
+  bool isSelected(String clipId) => selectedClipIds.contains(clipId);
+
+  bool get hasMultipleSelected => selectedClipIds.length > 1;
+
   final String? selectedTrackId;
+
+  /// Copied clips, kept in timeline order so paste preserves their spacing.
+  final List<Clip> clipboard;
+
+  bool get canPaste => clipboard.isNotEmpty;
   final EditorTool activeTool;
 
   final List<UndoEntry> undoStack;
@@ -84,7 +112,19 @@ class EditorState {
   String? get undoLabel => undoStack.isEmpty ? null : undoStack.last.label;
   String? get redoLabel => redoStack.isEmpty ? null : redoStack.last.label;
 
-  bool get hasSelection => selectedClipId != null;
+  bool get hasSelection => selectedClipIds.isNotEmpty;
+
+  /// Every selected clip that still exists, in timeline order.
+  List<Clip> get selectedClips {
+    final found = <Clip>[];
+    for (final track in timeline.tracks) {
+      for (final clip in track.clips) {
+        if (selectedClipIds.contains(clip.id)) found.add(clip);
+      }
+    }
+    found.sort((a, b) => a.start.compareTo(b.start));
+    return found;
+  }
 
   /// The selected clip, or null. Resolved on demand rather than cached, so it
   /// can never go stale against the timeline.
@@ -96,8 +136,9 @@ class EditorState {
 
   EditorState copyWith({
     Project? project,
-    String? selectedClipId,
+    Set<String>? selectedClipIds,
     String? selectedTrackId,
+    List<Clip>? clipboard,
     EditorTool? activeTool,
     List<UndoEntry>? undoStack,
     List<UndoEntry>? redoStack,
@@ -111,8 +152,10 @@ class EditorState {
     bool clearMessages = false,
   }) => EditorState(
     project: project ?? this.project,
-    selectedClipId: clearSelection ? null : (selectedClipId ?? this.selectedClipId),
+    selectedClipIds:
+        clearSelection ? const {} : (selectedClipIds ?? this.selectedClipIds),
     selectedTrackId: clearSelection ? null : (selectedTrackId ?? this.selectedTrackId),
+    clipboard: clipboard ?? this.clipboard,
     activeTool: activeTool ?? this.activeTool,
     undoStack: undoStack ?? this.undoStack,
     redoStack: redoStack ?? this.redoStack,
@@ -129,7 +172,7 @@ class EditorState {
     final entry = UndoEntry(
       timeline: timeline,
       label: label,
-      selectedClipId: selectedClipId,
+      selectedClipIds: selectedClipIds,
     );
     final stack = [...undoStack, entry];
     // Bound the history — a long session with a big timeline would otherwise

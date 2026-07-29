@@ -34,7 +34,11 @@ enum EffectType {
   cinematicLut('cinematic_lut'),
   colorAdjust('color_adjust'),
   vignette('vignette'),
-  chromaKey('chroma_key');
+  chromaKey('chroma_key'),
+
+  /// Two-pass `vidstab`. Cannot be expressed inline — the compiler lifts it
+  /// into a pre-render step, which is why it has no filter emitter.
+  stabilise('stabilise');
 
   const EffectType(this.id);
   final String id;

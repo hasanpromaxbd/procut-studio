@@ -90,7 +90,12 @@ class EffectSpec {
     required this.buildFilters,
     this.commands = const [],
     this.isAudioEffect = false,
+    this.requiresPreRender = false,
   });
+
+  /// True when the effect cannot be expressed inline and the compiler must
+  /// lift it into its own pass — currently only two-pass stabilisation.
+  final bool requiresPreRender;
 
   /// Runtime-command bindings. Empty means this effect cannot be animated on
   /// export and renders at its `t=0` value.
@@ -766,6 +771,28 @@ abstract final class EffectCatalog {
         }
         return filters;
       },
+    ),
+
+    EffectSpec(
+      type: EffectType.stabilise,
+      label: 'Stabilise',
+      description: 'Smooths out camera shake. Analyses the clip first.',
+      icon: Icons.videocam_rounded,
+      stage: EffectStage.color,
+      shaderAsset: null,
+      requiresPreRender: true,
+      params: const [
+        EffectParamSpec(
+          key: 'smoothing',
+          label: 'Smoothing',
+          min: 1,
+          max: 60,
+          defaultValue: 10,
+          unit: 'f',
+        ),
+      ],
+      // Emitted by the pre-render pass, not inline — see TimelineCompiler.
+      buildFilters: (fx) => const [],
     ),
 
     EffectSpec(

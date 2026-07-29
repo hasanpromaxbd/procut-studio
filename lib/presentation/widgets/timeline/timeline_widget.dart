@@ -107,7 +107,7 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                     painter: TimelinePainter(
                       timeline: timeline,
                       view: view,
-                      selectedClipId: editor.selectedClipId,
+                      selectedClipIds: editor.selectedClipIds,
                       colorScheme: theme.colorScheme,
                       thumbnails: ref.read(thumbnailCacheProvider),
                       assetsById: assetsById,
@@ -215,9 +215,11 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     );
     if (!hit.isClip) return;
     HapticFeedback.mediumImpact();
+    // Long-press extends the selection. A plain tap replaces it, so this is the
+    // only way to build a multi-clip selection on a touch screen.
     ref
         .read(editorControllerProvider(widget.projectId).notifier)
-        .select(hit.clip!.id, trackId: hit.track?.id);
+        .toggleSelection(hit.clip!.id, trackId: hit.track?.id);
   }
 
   void _handleScaleStart(

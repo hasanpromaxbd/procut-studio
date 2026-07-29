@@ -12,6 +12,7 @@ library;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -27,7 +28,7 @@ class TimelinePainter extends CustomPainter {
   TimelinePainter({
     required this.timeline,
     required this.view,
-    required this.selectedClipId,
+    required this.selectedClipIds,
     required this.colorScheme,
     required this.thumbnails,
     required this.assetsById,
@@ -38,7 +39,7 @@ class TimelinePainter extends CustomPainter {
 
   final Timeline timeline;
   final TimelineViewState view;
-  final String? selectedClipId;
+  final Set<String> selectedClipIds;
   final ColorScheme colorScheme;
   final ThumbnailCache thumbnails;
 
@@ -73,7 +74,59 @@ class TimelinePainter extends CustomPainter {
       }
     }
 
+    _paintMarkers(canvas, size);
     _paintSnapGuide(canvas, size);
+  }
+
+  /// Markers live in the ruler strip: a coloured flag with a label, and a thin
+  /// line down the tracks so the alignment is visible where it matters.
+  void _paintMarkers(Canvas canvas, Size size) {
+    for (final marker in timeline.markers) {
+      final x = view.timeToViewportX(marker.time);
+      if (x < -40 || x > size.width + 40) continue;
+
+      final colour = Color(marker.kind.colorValue);
+
+      if (marker.isDense) {
+        // Beat markers arrive in the hundreds — a tick, not a flag, or the
+        // ruler becomes unreadable.
+        canvas.drawLine(
+          Offset(x, TimelineMetrics.rulerHeight - 6),
+          Offset(x, TimelineMetrics.rulerHeight),
+          Paint()
+            ..color = colour.withValues(alpha: 0.75)
+            ..strokeWidth = 1,
+        );
+        continue;
+      }
+
+      canvas.drawLine(
+        Offset(x, TimelineMetrics.rulerHeight),
+        Offset(x, size.height),
+        Paint()
+          ..color = colour.withValues(alpha: 0.28)
+          ..strokeWidth = 1,
+      );
+
+      // Flag.
+      final flag = Path()
+        ..moveTo(x, TimelineMetrics.rulerHeight - 14)
+        ..lineTo(x + 9, TimelineMetrics.rulerHeight - 11)
+        ..lineTo(x, TimelineMetrics.rulerHeight - 8)
+        ..close();
+      canvas.drawPath(flag, Paint()..color = colour);
+
+      if (marker.label.isNotEmpty) {
+        _drawText(
+          canvas,
+          marker.label,
+          Offset(x + 11, TimelineMetrics.rulerHeight - 16),
+          colour,
+          9,
+          maxWidth: 90,
+        );
+      }
+    }
   }
 
   // ── Ruler ────────────────────────────────────────────────────────────
@@ -185,7 +238,7 @@ class TimelinePainter extends CustomPainter {
       rect,
       const Radius.circular(Radii.sm),
     );
-    final isSelected = clip.id == selectedClipId;
+    final isSelected = selectedClipIds.contains(clip.id);
     final accent = Color(layout.track.type.colorValue);
 
     canvas.save();
@@ -483,7 +536,7 @@ class TimelinePainter extends CustomPainter {
   bool shouldRepaint(TimelinePainter old) =>
       old.timeline != timeline ||
       old.view != view ||
-      old.selectedClipId != selectedClipId ||
+      !setEquals(old.selectedClipIds, selectedClipIds) ||
       old.snapGuideTime != snapGuideTime ||
       old.waveforms.length != waveforms.length ||
       old.colorScheme != colorScheme;

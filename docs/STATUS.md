@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 159 tests passing, debug and release
+Verified state: `flutter analyze` clean, 193 tests passing, debug and release
 APKs build.
 
 ---
@@ -31,6 +31,15 @@ APKs build.
 | Delete (+ ripple) | Implemented + tested | `TimelineOperations.delete` |
 | Freeze frame | Implemented + tested | Split + still segment, see note 2 |
 | Keyframe animation | Implemented + tested | `AnimatableDouble`, 7 easing curves |
+| Speed ramping (curve speed) | Implemented + tested | See note 7 |
+| Shape masks (rect/ellipse/linear) | Implemented + tested | Animatable; shader + `geq` |
+| Multi-select and copy/paste | Implemented + tested | Long-press extends the selection |
+| Markers and chapters | Implemented + tested | Snap targets; beat markers from detection |
+| Adjustment layers | Implemented + tested | `TrackType.adjustment`, gated by `enable` |
+| Stabilisation | Implemented + tested | Two-pass `vidstab`, see note 8 |
+| Auto-reframe | Implemented | Recentres on aspect change; follows tracking when supplied |
+| Project templates | Implemented + tested | Slot-based, preserves the edit's rhythm |
+| Platform export presets | Implemented + tested | Reels/Shorts/TikTok/YouTube/master |
 
 **Note 1 — reverse.** FFmpeg's `reverse` buffers the whole segment, so it runs
 as a pre-render pass rather than inline. Correctly handled in `split`: for a
@@ -40,6 +49,18 @@ test.
 **Note 2 — freeze frame.** Modelled as three clips (before / frozen / after)
 rather than a special clip type, so every other operation keeps working on the
 result.
+
+**Note 7 — speed ramping.** `MediaClip.speedCurve` is an optional animatable
+rate. Source consumption is the *integral* of the rate, computed on a midpoint
+grid because an eased curve has no closed form — and the clip's timeline length
+is solved by bisection so it consumes exactly its source window. FFmpeg's
+`setpts` cannot express that integral either, so the export approximates the
+ramp with constant-rate segments and warns that a very long ramp may step.
+
+**Note 8 — stabilisation.** Modelled as an effect the compiler intercepts, not
+a field on the clip: `vidstabdetect` writes a motion file that
+`vidstabtransform` then consumes, so it needs two passes. It reuses the
+`PreRenderStep` machinery originally built for reversed clips.
 
 ## Effects
 
@@ -230,10 +251,17 @@ Worth stating plainly:
    shipping FFmpeg twice.
 3. **Preview caps at 4 concurrent video layers.** Android's decoder pool is
    small and device-dependent. Export is unaffected.
-4. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette
+4. **Some new features are engine-complete but thinly surfaced.** Motion
+   tracking converts to keyframes (`applyTracking`) and templates apply
+   correctly (`ProjectTemplate.apply`), both covered by tests, but neither has
+   a dedicated UI yet — tracking is reachable only through the AI sheet's
+   backend call, and templates have no browser. The chroma-key eyedropper is
+   also not built: the effect works, but the key colour must be set as a hex
+   string rather than picked off the preview.
+5. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette
    use FFmpeg filters with no runtime-command support, so a keyframed one
    renders at its first-frame value. The export warns rather than silently
    flattening it.
-5. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
+6. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
    plugin skips applying the Kotlin plugin on AGP 9. Removable once upstream
    ships a fix.

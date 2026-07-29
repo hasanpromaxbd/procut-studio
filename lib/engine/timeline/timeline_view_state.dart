@@ -180,6 +180,11 @@ class TimelineViewState {
     consider(Duration.zero, SnapTarget.origin);
     if (playhead != null) consider(playhead, SnapTarget.playhead);
 
+    // Markers are deliberate reference points, so they snap like clip edges.
+    for (final marker in timeline.markers) {
+      consider(marker.time, SnapTarget.marker);
+    }
+
     for (final track in timeline.tracks) {
       for (final clip in track.clips) {
         if (clip.id == excludeClipId) continue;
@@ -331,7 +336,7 @@ class TimelineViewState {
   );
 }
 
-enum SnapTarget { none, origin, playhead, clipEdge }
+enum SnapTarget { none, origin, playhead, clipEdge, marker }
 
 @immutable
 class SnapResult {

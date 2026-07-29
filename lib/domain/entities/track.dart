@@ -17,7 +17,11 @@ enum TrackType {
   audio('audio'),
   overlay('overlay'),
   text('text'),
-  sticker('sticker');
+  sticker('sticker'),
+
+  /// Holds effects only. Its effects apply to everything composited *below*
+  /// it, rather than to media of its own — the standard "adjustment layer".
+  adjustment('adjustment');
 
   const TrackType(this.id);
   final String id;
@@ -32,6 +36,9 @@ enum TrackType {
       kind == ClipKind.video || kind == ClipKind.image || kind == ClipKind.sticker,
     TrackType.text => kind == ClipKind.text,
     TrackType.sticker => kind == ClipKind.sticker,
+    // An adjustment clip is a span with effects on it; an image clip is the
+    // simplest carrier we already have, rendered as a pass-through.
+    TrackType.adjustment => kind == ClipKind.image,
   };
 
   /// The track type a clip of [kind] belongs on when auto-placing.
@@ -51,6 +58,7 @@ enum TrackType {
     TrackType.overlay => AppColors.trackOverlay.toARGB32(),
     TrackType.text => AppColors.trackText.toARGB32(),
     TrackType.sticker => AppColors.trackSticker.toARGB32(),
+    TrackType.adjustment => AppColors.trackEffect.toARGB32(),
   };
 
   double get defaultHeight => switch (this) {
@@ -59,6 +67,7 @@ enum TrackType {
     TrackType.audio => TimelineMetrics.audioTrackHeight,
     TrackType.text => TimelineMetrics.compactTrackHeight,
     TrackType.sticker => TimelineMetrics.compactTrackHeight,
+    TrackType.adjustment => TimelineMetrics.compactTrackHeight,
   };
 
   String get label => switch (this) {
@@ -67,6 +76,7 @@ enum TrackType {
     TrackType.overlay => 'Overlay',
     TrackType.text => 'Text',
     TrackType.sticker => 'Sticker',
+    TrackType.adjustment => 'Adjustment',
   };
 }
 

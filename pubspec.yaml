@@ -74,6 +74,7 @@ flutter:
     - shaders/film_grain.frag
     - shaders/sharpen.frag
     - shaders/lut3d.frag
+    - shaders/mask.frag
     - shaders/transition_fade.frag
     - shaders/transition_glitch.frag
     - shaders/transition_warp.frag

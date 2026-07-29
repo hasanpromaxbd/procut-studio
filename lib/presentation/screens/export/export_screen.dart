@@ -10,6 +10,7 @@ import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_utils.dart';
 import '../../../domain/entities/export_job.dart';
+import '../../../domain/entities/export_preset.dart';
 import '../../../domain/entities/export_settings.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/export_controller.dart';
@@ -141,6 +142,55 @@ class _SettingsForm extends ConsumerWidget {
               ],
             ),
           ),
+        ),
+
+        const SectionHeader(title: 'Target'),
+        Text(
+          'A preset sets everything below. Platforms re-encode whatever you '
+          'send, so a clean master at the right shape beats a huge upload.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: Spacing.sm),
+        Wrap(
+          spacing: Spacing.sm,
+          runSpacing: Spacing.sm,
+          children: [
+            for (final preset in ExportPreset.all)
+              ActionChip(
+                avatar: preset.matches(timeline)
+                    ? Icon(
+                        Icons.check_rounded,
+                        size: 15,
+                        color: theme.colorScheme.secondary,
+                      )
+                    : null,
+                label: Text(preset.name),
+                tooltip: preset.description,
+                onPressed: () => controller.applyPreset(preset),
+              ),
+          ],
+        ),
+        Builder(
+          builder: (context) {
+            // Warn about the two things a preset cannot silently fix.
+            final over = ExportPreset.all
+                .where((p) => p.exceedsLimit(timeline.duration))
+                .map((p) => p.name)
+                .toList();
+            if (over.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: Spacing.sm),
+              child: Text(
+                'This edit is ${TimeUtils.formatShort(timeline.duration)} — '
+                'too long for ${over.join(', ')}.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.tertiary,
+                ),
+              ),
+            );
+          },
         ),
 
         const SectionHeader(title: 'Resolution'),

@@ -18,6 +18,8 @@ import '../../core/utils/time_utils.dart';
 import '../entities/clip.dart';
 import '../entities/effect.dart';
 import '../entities/keyframe.dart';
+import '../entities/marker.dart';
+import '../entities/mask.dart';
 import '../entities/timeline.dart';
 import '../entities/track.dart';
 import '../entities/transform2d.dart';
@@ -80,6 +82,8 @@ abstract final class TimelineOperations {
     final rightTransform =
         clip.transform.shifted(-leftDuration).clampedTo(rightDuration);
     final leftTransform = clip.transform.clampedTo(leftDuration);
+    final rightMask = clip.mask.shifted(-leftDuration).clampedTo(rightDuration);
+    final leftMask = clip.mask.clampedTo(leftDuration);
     final rightEffects = _shiftEffects(clip.effects, -leftDuration);
 
     switch (clip) {
@@ -97,6 +101,7 @@ abstract final class TimelineOperations {
             duration: leftDuration,
             sourceIn: leftSourceIn,
             transform: leftTransform,
+            mask: leftMask,
             volume: clip.volume.clampedTo(leftDuration),
             audioFadeOut: Duration.zero,
             clearTransition: true,
@@ -107,6 +112,7 @@ abstract final class TimelineOperations {
             duration: rightDuration,
             sourceIn: rightSourceIn,
             transform: rightTransform,
+            mask: rightMask,
             effects: rightEffects,
             volume: clip.volume.shifted(-leftDuration).clampedTo(rightDuration),
             audioFadeIn: Duration.zero,
@@ -124,6 +130,7 @@ abstract final class TimelineOperations {
           clip.copyWith(
             duration: leftDuration,
             sourceIn: leftSourceIn,
+            mask: leftMask,
             volume: clip.volume.clampedTo(leftDuration),
             fadeOut: Duration.zero,
             clearTransition: true,
@@ -133,6 +140,7 @@ abstract final class TimelineOperations {
             start: rightStart,
             duration: rightDuration,
             sourceIn: rightSourceIn,
+            mask: rightMask,
             effects: rightEffects,
             volume: clip.volume.shifted(-leftDuration).clampedTo(rightDuration),
             fadeIn: Duration.zero,
@@ -144,6 +152,7 @@ abstract final class TimelineOperations {
           clip.copyWith(
             duration: leftDuration,
             transform: leftTransform,
+            mask: leftMask,
             clearTransition: true,
           ),
           clip.copyWith(
@@ -151,6 +160,7 @@ abstract final class TimelineOperations {
             start: rightStart,
             duration: rightDuration,
             transform: rightTransform,
+            mask: rightMask,
             effects: rightEffects,
           ),
         );
@@ -160,6 +170,7 @@ abstract final class TimelineOperations {
           clip.copyWith(
             duration: leftDuration,
             transform: leftTransform,
+            mask: leftMask,
             clearTransition: true,
           ),
           clip.copyWith(
@@ -167,6 +178,7 @@ abstract final class TimelineOperations {
             start: rightStart,
             duration: rightDuration,
             transform: rightTransform,
+            mask: rightMask,
             effects: rightEffects,
           ),
         );
@@ -176,6 +188,7 @@ abstract final class TimelineOperations {
           clip.copyWith(
             duration: leftDuration,
             transform: leftTransform,
+            mask: leftMask,
             clearTransition: true,
           ),
           clip.copyWith(
@@ -183,6 +196,7 @@ abstract final class TimelineOperations {
             start: rightStart,
             duration: rightDuration,
             transform: rightTransform,
+            mask: rightMask,
             effects: rightEffects,
           ),
         );
@@ -244,6 +258,7 @@ abstract final class TimelineOperations {
     Duration delta,
   ) {
     final transform = clip.transform.shifted(-delta).clampedTo(newDuration);
+    final mask = clip.mask.shifted(-delta).clampedTo(newDuration);
     switch (clip) {
       case VideoClip():
         return clip.copyWith(
@@ -251,8 +266,9 @@ abstract final class TimelineOperations {
           duration: newDuration,
           sourceIn: clip.reversed
               ? clip.sourceIn
-              : clip.sourceIn + TimeUtils.unscale(delta, clip.speed),
+              : clip.sourceIn + clip.integrateSpeed(Duration.zero, delta),
           transform: transform,
+          mask: mask,
           volume: clip.volume.shifted(-delta).clampedTo(newDuration),
         );
       case AudioClip():
@@ -261,7 +277,8 @@ abstract final class TimelineOperations {
           duration: newDuration,
           sourceIn: clip.reversed
               ? clip.sourceIn
-              : clip.sourceIn + TimeUtils.unscale(delta, clip.speed),
+              : clip.sourceIn + clip.integrateSpeed(Duration.zero, delta),
+          mask: mask,
           volume: clip.volume.shifted(-delta).clampedTo(newDuration),
         );
       case ImageClip():
@@ -269,18 +286,21 @@ abstract final class TimelineOperations {
           start: newStart,
           duration: newDuration,
           transform: transform,
+          mask: mask,
         );
       case TextClip():
         return clip.copyWith(
           start: newStart,
           duration: newDuration,
           transform: transform,
+          mask: mask,
         );
       case StickerClip():
         return clip.copyWith(
           start: newStart,
           duration: newDuration,
           transform: transform,
+          mask: mask,
         );
     }
   }
@@ -334,6 +354,7 @@ abstract final class TimelineOperations {
     final trimmed = clip.copyWithBase(
       duration: newDuration,
       transform: clip.transform.clampedTo(newDuration),
+      mask: clip.mask.clampedTo(newDuration),
     );
     return Result.ok(timeline.replaceTrack(track.replaceClip(trimmed)));
   }
@@ -946,6 +967,216 @@ abstract final class TimelineOperations {
       cursor += clip.duration;
     }
     return Result.ok(timeline.replaceTrack(track.withClips(compacted)));
+  }
+
+  // ── Speed ramping ────────────────────────────────────────────────────
+
+  /// Installs a speed curve on a clip, re-timing it to match.
+  ///
+  /// The clip's timeline length changes because a ramp consumes a different
+  /// amount of source than a constant rate would. Following clips ripple so the
+  /// cut pattern after it survives.
+  static Result<Timeline> setSpeedCurve(
+    Timeline timeline,
+    String clipId,
+    AnimatableDouble? curve, {
+    bool ripple = true,
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip is! MediaClip) {
+      return const Result.err(
+        InvalidEditFailure('Only video and audio clips have a speed.'),
+      );
+    }
+
+    // The source window is fixed; solve for the timeline length that consumes
+    // exactly it under the new curve. Bisection, because the relationship has
+    // no closed form for an arbitrary eased curve.
+    final targetSource = clip.sourceDuration;
+    final probe = _withCurve(clip, curve);
+    final newDuration = curve == null
+        ? TimeUtils.scale(targetSource, clip.speed)
+        : _solveDurationFor(probe, targetSource, timeline.fps);
+
+    if (newDuration < AppConstants.minClipDuration) {
+      return const Result.err(
+        InvalidEditFailure('That ramp would make the clip shorter than a frame.'),
+      );
+    }
+
+    final delta = newDuration - clip.duration;
+    final retimed = _withCurve(clip, curve).copyWithBase(duration: newDuration);
+
+    var nextTrack = track.replaceClip(retimed);
+    if (ripple && delta != Duration.zero) {
+      nextTrack = nextTrack.withClips(
+        nextTrack.clips
+            .map(
+              (c) => c.id != clip.id && c.start >= clip.end
+                  ? c.copyWithBase(start: c.start + delta)
+                  : c,
+            )
+            .toList(),
+      );
+    }
+    return Result.ok(timeline.replaceTrack(nextTrack));
+  }
+
+  static MediaClip _withCurve(MediaClip clip, AnimatableDouble? curve) =>
+      switch (clip) {
+        VideoClip() => clip.copyWith(
+          speedCurve: curve,
+          clearSpeedCurve: curve == null,
+        ),
+        AudioClip() => clip.copyWith(
+          speedCurve: curve,
+          clearSpeedCurve: curve == null,
+        ),
+        ImageClip() => clip,
+      };
+
+  /// Finds the timeline duration whose speed integral equals [targetSource].
+  static Duration _solveDurationFor(
+    MediaClip clip,
+    Duration targetSource,
+    int fps,
+  ) {
+    var lo = AppConstants.minClipDuration.inMicroseconds.toDouble();
+    var hi = targetSource.inMicroseconds * (1 / AppConstants.minClipSpeed);
+
+    for (var i = 0; i < 40; i++) {
+      final mid = (lo + hi) / 2;
+      final candidate = clip.copyWithBase(
+        duration: Duration(microseconds: mid.round()),
+      );
+      final consumed = candidate is MediaClip
+          ? candidate.sourceDuration.inMicroseconds
+          : 0;
+      if (consumed < targetSource.inMicroseconds) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return TimeUtils.snapToFrame(
+      Duration(microseconds: ((lo + hi) / 2).round()),
+      fps,
+    );
+  }
+
+  // ── Masking ──────────────────────────────────────────────────────────
+
+  static Result<Timeline> setMask(
+    Timeline timeline,
+    String clipId,
+    Mask mask,
+  ) => _mapClip(timeline, clipId, (clip) => clip.copyWithBase(mask: mask));
+
+  static Result<Timeline> clearMask(Timeline timeline, String clipId) =>
+      _mapClip(timeline, clipId, (clip) => clip.copyWithBase(mask: Mask.none));
+
+  // ── Markers ──────────────────────────────────────────────────────────
+
+  static Result<Timeline> addMarker(
+    Timeline timeline,
+    Duration at, {
+    String label = '',
+    MarkerKind kind = MarkerKind.note,
+  }) {
+    final snapped = TimeUtils.snapToFrame(at, timeline.fps);
+    // One marker per frame per kind: a double-tap should not stack two.
+    final clash = timeline.markers.any(
+      (m) => m.kind == kind && m.time == snapped,
+    );
+    if (clash) return Result.ok(timeline);
+
+    return Result.ok(
+      timeline.copyWith(
+        markers: [
+          ...timeline.markers,
+          Marker(
+            id: IdGenerator.sortable('mrk'),
+            time: snapped,
+            label: label,
+            kind: kind,
+          ),
+        ]..sort((a, b) => a.time.compareTo(b.time)),
+      ),
+    );
+  }
+
+  static Result<Timeline> removeMarker(Timeline timeline, String markerId) =>
+      Result.ok(
+        timeline.copyWith(
+          markers: timeline.markers.where((m) => m.id != markerId).toList(),
+        ),
+      );
+
+  static Result<Timeline> renameMarker(
+    Timeline timeline,
+    String markerId,
+    String label,
+  ) => Result.ok(
+    timeline.copyWith(
+      markers: timeline.markers
+          .map((m) => m.id == markerId ? m.copyWith(label: label) : m)
+          .toList(),
+    ),
+  );
+
+  /// Replaces all beat markers with a freshly detected set.
+  static Result<Timeline> setBeatMarkers(
+    Timeline timeline,
+    List<Duration> beats,
+  ) => Result.ok(
+    timeline.copyWith(
+      markers: [
+        ...timeline.markers.where((m) => m.kind != MarkerKind.beat),
+        for (final beat in beats)
+          Marker(
+            id: IdGenerator.sortable('beat'),
+            time: TimeUtils.snapToFrame(beat, timeline.fps),
+            kind: MarkerKind.beat,
+          ),
+      ]..sort((a, b) => a.time.compareTo(b.time)),
+    ),
+  );
+
+  // ── Paste ────────────────────────────────────────────────────────────
+
+  /// Drops copied clips at [at], preserving their relative offsets.
+  ///
+  /// Each lands on a track accepting its kind, and anything that will not fit
+  /// is appended rather than dropped — losing a paste silently is worse than
+  /// putting it slightly wrong.
+  static Result<Timeline> paste(
+    Timeline timeline,
+    List<Clip> clips,
+    Duration at,
+  ) {
+    if (clips.isEmpty) return Result.ok(timeline);
+
+    final anchor = clips
+        .map((c) => c.start)
+        .reduce((a, b) => a < b ? a : b);
+    var next = timeline;
+
+    for (final clip in clips) {
+      final offset = clip.start - anchor;
+      final target = next.trackById(clip.trackId) ??
+          next.tracks.where((t) => t.type.accepts(clip.kind)).firstOrNull;
+      if (target == null) continue;
+
+      final placed = _withNewId(clip, at + offset)
+          .copyWithBase(trackId: target.id);
+      final result = insertClip(next, target.id, placed, at: at + offset);
+      next = result.getOrElse(next);
+    }
+    return Result.ok(next);
   }
 
   static Result<Timeline> _mapClip(

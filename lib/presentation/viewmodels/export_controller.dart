@@ -11,6 +11,7 @@ import '../../core/error/result.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/utils/id_generator.dart';
 import '../../domain/entities/export_job.dart';
+import '../../domain/entities/export_preset.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/project.dart';
 
@@ -42,6 +43,15 @@ class ExportSettingsController extends Notifier<ExportSettings> {
     state = state.copyWith(
       resolution: resolution,
       fps: project.timeline.fps,
+    );
+  }
+
+  /// Applies a named target, keeping the user's hardware-encoding choice —
+  /// that is a device preference, not a platform requirement.
+  void applyPreset(ExportPreset preset) {
+    state = preset.settings.copyWith(
+      useHardwareEncoder: state.useHardwareEncoder,
+      fileNameOverride: state.fileNameOverride,
     );
   }
 

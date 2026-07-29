@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  159 tests, all passing
+flutter test                 →  193 tests, all passing
 flutter build apk --debug    →  built (174 MB, 3 ABIs)
 flutter build apk --release  →  built (110 MB, R8 + shrinker)
 ```
@@ -36,6 +36,10 @@ what is architected with a working seam but needs an external piece. See
 | Speed 0.1×–10×, reverse, freeze frame | Implemented + tested |
 | Crop / rotate / flip / opacity / blend modes | Implemented |
 | Keyframe animation with easing curves | Implemented + tested — animates on export via `sendcmd` |
+| Speed ramping, shape masks, adjustment layers | Implemented + tested |
+| Multi-select, copy/paste, markers, templates | Implemented + tested |
+| Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
+| Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |
 | 14 effects (blur, glow, VHS, RGB split, grain, LUT, …) | Implemented — GPU shader + FFmpeg filter |
 | 10 transitions | Implemented — 6 native `xfade`, 4 via custom per-pixel expressions |
 | Text layers, 1500+ fonts, gradient/stroke/glow/shadow, 11 animations | Implemented |
@@ -131,7 +135,8 @@ lib/
 │   ├── audio/      waveform extraction, beat detection
 │   └── ai/         AI service and backend contract
 ├── presentation/   viewmodels, screens, widgets
-shaders/            14 GLSL fragment shaders
+shaders/            15 GLSL fragment shaders
+tool/               reproducible shader + sendcmd verification scripts
 assets/luts/        4 original .cube colour LUTs
 test/               unit + widget tests
 ```
