@@ -48,3 +48,6 @@ app.*.map.json
 android/key.properties
 *.jks
 *.keystore
+
+# Built artefacts staged for distribution — never commit binaries
+/dist/
