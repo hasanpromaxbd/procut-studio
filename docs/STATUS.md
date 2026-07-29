@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 142 tests passing, debug and release
+Verified state: `flutter analyze` clean, 159 tests passing, debug and release
 APKs build.
 
 ---
@@ -133,10 +133,21 @@ what was composed.
 | Colour enhancement | Implemented | `signalstats` → derived correction |
 | Upscaling | Implemented | Lanczos + unsharp — see note 5 |
 | Voice isolation | Implemented | Speech-band chain — see note 5 |
-| Auto caption | Architected | Needs `AiBackend` |
-| Background removal | Architected | Needs `AiBackend` |
-| Object tracking | Architected | Needs `AiBackend` |
-| Face tracking | Architected | Needs `AiBackend` |
+| Auto caption | Implemented | Needs a configured server; result becomes real caption clips |
+| Background removal | Implemented | Needs a server implementing `POST /matte` |
+| Object tracking | Implemented | Needs a server implementing `POST /track` |
+| Face tracking | Implemented | Needs a server implementing `POST /track/faces` |
+
+All seven are reachable from **AI** in the editor tool rail. The four local
+tools work with no setup. The model-backed ones need an endpoint configured in
+Settings → AI server; until then they are shown disabled with a route to set
+one up, rather than hidden or failing on tap.
+
+`HttpAiBackend` speaks the **OpenAI-compatible** API, so any of
+faster-whisper-server, speaches or whisper.cpp's server works by pointing
+Settings at `http://host:port/v1`. Captions come back as timed cues and are
+converted into real `TextClip`s on their own caption track, wrapped to a
+readable line length, with low-confidence cues flagged for review.
 
 **Note 5 — naming.** Upscaling is classical resampling: it does not invent
 detail, because nothing running locally without a model can. Voice isolation
@@ -209,7 +220,10 @@ suits an editor better than tabs |
 
 Worth stating plainly:
 
-1. **Auto-caption needs a backend.** No model ships with the app.
+1. **The model-backed AI features need a server.** No model weights ship with
+   the app, and none can — they are hundreds of megabytes and licence-encumbered.
+   `HttpAiBackend` makes them work against a self-hosted endpoint; the app
+   states this plainly rather than implying on-device inference.
 2. **Background export does not survive a force-stop or reboot.** The
    foreground service covers backgrounding, screen-off and memory pressure;
    nothing short of a second process would cover the rest, and that would mean

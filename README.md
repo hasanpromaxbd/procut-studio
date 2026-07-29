@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  142 tests, all passing
+flutter test                 →  159 tests, all passing
 flutter build apk --debug    →  built (174 MB, 3 ABIs)
 flutter build apk --release  →  built (110 MB, R8 + shrinker)
 ```
@@ -47,7 +47,7 @@ what is architected with a working seam but needs an external piece. See
 | Background export with progress notification | Implemented — foreground service |
 | Auto-save, backups, project bundles (import/export) | Implemented |
 | AI: scene detect, colour enhance, upscale, voice isolation | Implemented — local FFmpeg DSP |
-| AI: captions, background removal, object/face tracking | Architected — needs a model backend, see below |
+| AI: captions, background removal, object/face tracking | Implemented — needs a self-hosted endpoint, see below |
 
 ### About the AI features
 
@@ -59,10 +59,14 @@ blurring them:
   offline and are deterministic. They are signal processing, not learned
   models, and the code names them accordingly.
 - **Model-backed** — captions, background removal and object/face tracking need
-  neural weights. **This app bundles none.** They route through a pluggable
-  `AiBackend` you point at an inference endpoint. With nothing configured they
-  fail immediately with a "set this up in Settings" message rather than hanging
-  on a spinner that never resolves.
+  neural weights. **This app bundles none**, and cannot: they are hundreds of
+  megabytes and licence-encumbered. `HttpAiBackend` speaks the
+  OpenAI-compatible API, so pointing Settings → AI server at a self-hosted
+  faster-whisper / speaches / whisper.cpp instance (`http://host:port/v1`)
+  makes captions work for real. With nothing configured they are shown disabled
+  with a route to set one up, rather than hanging on a spinner.
+
+All seven tools are reachable from **AI** in the editor tool rail.
 
 ## Architecture
 

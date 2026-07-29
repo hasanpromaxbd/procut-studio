@@ -18,7 +18,9 @@ import '../../core/utils/debouncer.dart';
 import '../../core/utils/id_generator.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
+import '../../domain/entities/keyframe.dart';
 import '../../domain/entities/media_asset.dart';
+import '../../domain/entities/subtitle.dart';
 import '../../domain/entities/text_style_spec.dart';
 import '../../domain/entities/timeline.dart';
 import '../../domain/entities/track.dart';
@@ -644,6 +646,174 @@ class EditorController extends Notifier<EditorState?> {
     );
     final track = found!.$1.replaceClip(updated);
     _apply(Result.ok(current.timeline.replaceTrack(track)), 'edit text');
+  }
+
+  /// Turns a recognised [SubtitleTrack] into real text clips.
+  ///
+  /// Cues land on their own track so the whole caption set can be styled,
+  /// moved or deleted as a unit, and each clip is flagged `isSubtitle` so a
+  /// later "restyle all captions" acts on exactly these.
+  void addSubtitles(
+    SubtitleTrack track, {
+    TextStyleSpec? style,
+    Duration offset = Duration.zero,
+  }) {
+    final current = state;
+    if (current == null || track.isEmpty) return;
+
+    var timeline = current.timeline;
+    // A dedicated track, even if a text track already exists: mixing captions
+    // in with hand-placed titles makes both harder to manage.
+    final added = TimelineOperations.addTrack(timeline, TrackType.text);
+    timeline = added.getOrElse(timeline);
+    final captionTrack = timeline.tracks.last;
+
+    final captionStyle = style ??
+        const TextStyleSpec(
+          fontSize: 0.045,
+          strokeWidth: 0.08,
+          alignment: TextAlignment.center,
+        );
+
+    final clips = <Clip>[];
+    for (final cue in track.wrapped().cues) {
+      final start = cue.start + offset;
+      if (cue.duration < AppConstants.minClipDuration) continue;
+
+      clips.add(
+        TextClip(
+          id: IdGenerator.subtitle(),
+          trackId: captionTrack.id,
+          start: start,
+          duration: cue.duration,
+          text: cue.text,
+          style: captionStyle,
+          isSubtitle: true,
+          // Machine transcription is rarely perfect; a low-confidence cue is
+          // labelled so the review pass knows where to look.
+          label: cue.isUncertain ? 'check' : null,
+          transform: Transform2D.identity.copyWith(
+            y: const AnimatableDouble.constant(0.34),
+          ),
+        ),
+      );
+    }
+
+    if (clips.isEmpty) return;
+
+    _apply(
+      Result.ok(timeline.replaceTrack(captionTrack.withClips(clips))),
+      'add captions',
+    );
+    state = state?.copyWith(
+      statusMessage: '${clips.length} captions added — check them before export',
+    );
+  }
+
+  /// Applies AI-suggested colour correction as a real, editable effect rather
+  /// than a hidden adjustment, so the user can tune or remove it.
+  void applyColorSuggestion(Map<String, double> values) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+
+    final spec = EffectCatalog.specFor(EffectType.colorAdjust);
+    if (spec == null) return;
+
+    var effect = spec.instantiate(IdGenerator.effect());
+    for (final entry in values.entries) {
+      effect = effect.withParamValue(entry.key, entry.value);
+    }
+
+    _apply(
+      TimelineOperations.addEffect(current.timeline, clipId, effect),
+      'AI colour',
+    );
+  }
+
+  /// Cuts the selected clip at each detected scene change.
+  ///
+  /// Applied back-to-front: splitting shifts nothing on the timeline, but each
+  /// split replaces the clip id, so working forwards would lose the target
+  /// after the first cut.
+  int applySceneCuts(List<Duration> cutTimes) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null || cutTimes.isEmpty) return 0;
+
+    final found = current.timeline.findClip(clipId);
+    if (found == null) return 0;
+    final clip = found.$2;
+
+    final inside = cutTimes
+        .map((t) => clip.start + t)
+        .where((t) => t > clip.start && t < clip.end)
+        .toList()
+      ..sort();
+    if (inside.isEmpty) return 0;
+
+    var timeline = current.timeline;
+    var applied = 0;
+    for (final at in inside.reversed) {
+      // Re-find each time: the id of the piece containing `at` changes as the
+      // clip is subdivided.
+      final target = _clipContaining(timeline, clip.trackId, at);
+      if (target == null) continue;
+      final result = TimelineOperations.split(timeline, target.id, at);
+      if (result.isOk) {
+        timeline = result.valueOrNull!;
+        applied++;
+      }
+    }
+
+    if (applied == 0) return 0;
+    _apply(Result.ok(timeline), 'scene cuts');
+    state = state?.copyWith(
+      clearSelection: true,
+      statusMessage: '$applied scene cut(s) applied',
+    );
+    return applied;
+  }
+
+  Clip? _clipContaining(Timeline timeline, String trackId, Duration at) {
+    final track = timeline.trackById(trackId);
+    if (track == null) return null;
+    return track.clipAt(at);
+  }
+
+  /// Replaces the selected clip's media with a processed file (upscale,
+  /// isolated voice), keeping every edit already made to the clip.
+  Future<void> replaceSelectedMedia(String newPath) async {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+
+    final imported = await _media.importFile(newPath);
+    final asset = imported.valueOrNull;
+    if (asset == null) {
+      state = current.copyWith(
+        errorMessage: imported.failureOrNull?.message ?? 'Import failed.',
+      );
+      return;
+    }
+
+    final found = current.timeline.findClip(clipId);
+    if (found == null) return;
+    final clip = found.$2;
+
+    final Clip? swapped = switch (clip) {
+      VideoClip() => clip.copyWith(assetId: asset.id),
+      AudioClip() => clip.copyWith(assetId: asset.id),
+      ImageClip() => clip.copyWith(assetId: asset.id),
+      _ => null,
+    };
+    if (swapped == null) return;
+
+    state = current.copyWith(project: current.project.withAsset(asset));
+    _apply(
+      Result.ok(current.timeline.replaceTrack(found.$1.replaceClip(swapped))),
+      'replace media',
+    );
   }
 
   void addSticker({String? emoji, String? assetPath, Duration? at}) {

@@ -28,6 +28,7 @@ import '../../widgets/common/glass_panel.dart';
 import '../../widgets/editor/preview_stage.dart';
 import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
+import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/record_sheet.dart';
 import 'sheets/speed_sheet.dart';
@@ -334,6 +335,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       case _ToolAction.record:
         await _recordVoiceOver();
 
+      case _ToolAction.ai:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: AiToolsSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.rotate:
         controller.rotateSelected();
 
@@ -537,6 +545,7 @@ enum _ToolAction {
   transition,
   text,
   record,
+  ai,
   rotate,
   flip,
   freeze,
@@ -598,6 +607,11 @@ class _ToolRail extends ConsumerWidget {
         icon: Icons.mic_rounded,
         label: 'Record',
         onPressed: () => onAction(_ToolAction.record),
+      ),
+      ToolIconButton(
+        icon: Icons.auto_awesome_rounded,
+        label: 'AI',
+        onPressed: () => onAction(_ToolAction.ai),
       ),
       ToolIconButton(
         icon: Icons.rotate_90_degrees_cw_rounded,

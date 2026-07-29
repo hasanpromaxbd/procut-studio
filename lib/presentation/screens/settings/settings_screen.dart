@@ -9,7 +9,9 @@ import '../../../core/di/providers.dart';
 import '../../../core/logging/app_logger.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/utils/time_utils.dart';
+import '../../../data/datasources/remote/http_ai_backend.dart';
 import '../../../domain/repositories/ai_repository.dart';
+import '../../viewmodels/ai_settings_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 
 final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(
@@ -52,6 +54,9 @@ class SettingsScreen extends ConsumerWidget {
             onSelectionChanged: (selection) =>
                 ref.read(themeModeProvider.notifier).set(selection.first),
           ),
+
+          const SectionHeader(title: 'AI server'),
+          const _AiBackendForm(),
 
           const SectionHeader(title: 'AI features'),
           capabilities.when(
@@ -152,6 +157,174 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+/// Configures the inference endpoint the model-backed features use.
+class _AiBackendForm extends ConsumerStatefulWidget {
+  const _AiBackendForm();
+
+  @override
+  ConsumerState<_AiBackendForm> createState() => _AiBackendFormState();
+}
+
+class _AiBackendFormState extends ConsumerState<_AiBackendForm> {
+  late final TextEditingController _url;
+  late final TextEditingController _key;
+  late final TextEditingController _model;
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = ref.read(aiSettingsProvider);
+    _url = TextEditingController(text: settings.baseUrl);
+    _key = TextEditingController(text: settings.apiKey);
+    _model = TextEditingController(text: settings.transcriptionModel);
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _key.dispose();
+    _model.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final reachable = ref.watch(aiBackendReachableProvider);
+    final configured = ref.watch(aiSettingsProvider).isConfigured;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Captions, background removal and tracking need a neural model. '
+          'ProCut ships none — point this at an OpenAI-compatible server '
+          '(faster-whisper, speaches, whisper.cpp) and they light up.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: Spacing.md),
+        TextField(
+          controller: _url,
+          onChanged: (_) => setState(() => _dirty = true),
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'Base URL',
+            hintText: 'http://192.168.1.10:8000/v1',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: Spacing.sm),
+        TextField(
+          controller: _key,
+          onChanged: (_) => setState(() => _dirty = true),
+          obscureText: true,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'API key (optional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: Spacing.sm),
+        TextField(
+          controller: _model,
+          onChanged: (_) => setState(() => _dirty = true),
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'Transcription model',
+            hintText: 'whisper-1',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: Spacing.md),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _dirty ? _save : null,
+                icon: const Icon(Icons.save_rounded, size: 18),
+                label: const Text('Save & test'),
+              ),
+            ),
+            if (configured) ...[
+              const SizedBox(width: Spacing.sm),
+              TextButton(onPressed: _clear, child: const Text('Clear')),
+            ],
+          ],
+        ),
+        if (configured && !_dirty) ...[
+          const SizedBox(height: Spacing.sm),
+          reachable.when(
+            loading: () => Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: Spacing.sm),
+                Text('Testing…', style: theme.textTheme.bodySmall),
+              ],
+            ),
+            error: (_, _) => Text(
+              'Could not reach the server',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+            data: (ok) => Row(
+              children: [
+                Icon(
+                  ok ? Icons.check_circle_rounded : Icons.error_rounded,
+                  size: 16,
+                  color: ok
+                      ? theme.colorScheme.secondary
+                      : theme.colorScheme.error,
+                ),
+                const SizedBox(width: Spacing.sm),
+                Expanded(
+                  child: Text(
+                    ok
+                        ? 'Server reachable'
+                        : 'Not reachable — check the address and that this '
+                              'device is on the same network',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _save() async {
+    await ref.read(aiSettingsControllerProvider).save(
+          AiSettings(
+            baseUrl: _url.text,
+            apiKey: _key.text,
+            transcriptionModel: _model.text.trim().isEmpty
+                ? 'whisper-1'
+                : _model.text.trim(),
+          ),
+        );
+    if (mounted) setState(() => _dirty = false);
+  }
+
+  Future<void> _clear() async {
+    await ref.read(aiSettingsControllerProvider).clear();
+    if (!mounted) return;
+    _url.clear();
+    _key.clear();
+    _model.text = 'whisper-1';
+    setState(() => _dirty = false);
   }
 }
 

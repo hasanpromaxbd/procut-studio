@@ -7,11 +7,14 @@
 /// class of bug that only appeared on cold start.
 library;
 
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/datasources/local/hive_store.dart';
 import '../../data/datasources/remote/asset_catalog_api.dart';
+import '../../data/datasources/remote/http_ai_backend.dart';
 import '../../data/repositories/asset_library_repository_impl.dart';
 import '../../data/repositories/media_repository_impl.dart';
 import '../../data/repositories/project_repository_impl.dart';
@@ -113,8 +116,41 @@ final assetCatalogApiProvider = Provider<AssetCatalogApi?>((ref) {
   return DioAssetCatalogApi(dio: ref.watch(dioProvider), baseUrl: baseUrl);
 });
 
-/// Optional inference backend for the model-driven AI features.
-final aiBackendProvider = Provider<AiBackend?>((ref) => null);
+/// Persisted AI backend configuration. Written by the Settings screen.
+final aiSettingsProvider = Provider<AiSettings>((ref) {
+  final raw = ref.watch(hiveStoreProvider).settings.get(aiSettingsKey);
+  if (raw == null) return const AiSettings();
+  try {
+    return AiSettings.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+  } catch (_) {
+    // A corrupt settings blob should not stop the app booting.
+    return const AiSettings();
+  }
+});
+
+const String aiSettingsKey = 'ai.backend';
+
+/// Inference backend for the model-driven AI features, or null when the user
+/// has not configured one. Everything model-backed checks this and fails fast
+/// rather than hanging.
+final aiBackendProvider = Provider<AiBackend?>((ref) {
+  final settings = ref.watch(aiSettingsProvider);
+  if (!settings.isConfigured) return null;
+
+  return HttpAiBackend(
+    dio: ref.watch(dioProvider),
+    baseUrl: settings.baseUrl,
+    apiKey: settings.apiKey.isEmpty ? null : settings.apiKey,
+    transcriptionModel: settings.transcriptionModel,
+  );
+});
+
+/// Reachability of the configured backend, for the Settings status line.
+final aiBackendReachableProvider = FutureProvider<bool>((ref) async {
+  final backend = ref.watch(aiBackendProvider);
+  if (backend == null) return false;
+  return backend.isReachable();
+});
 
 // ── Repositories ──────────────────────────────────────────────────────
 
