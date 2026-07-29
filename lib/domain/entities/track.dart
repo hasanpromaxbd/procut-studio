@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_dimens.dart';
 import 'clip.dart';
+import 'ducking.dart';
 
 enum TrackType {
   video('video'),
@@ -93,6 +94,7 @@ class Track {
     this.volume = 1.0,
     this.solo = false,
     this.heightOverride,
+    this.ducking,
   });
 
   final String id;
@@ -113,6 +115,11 @@ class Track {
   final bool solo;
 
   final double? heightOverride;
+
+  /// Automatic level ducking under another track's audio. Null means off.
+  final Ducking? ducking;
+
+  bool get isDucked => ducking?.isActive ?? false;
 
   double get height => heightOverride ?? type.defaultHeight;
 
@@ -258,6 +265,8 @@ class Track {
     double? volume,
     bool? solo,
     double? heightOverride,
+    Ducking? ducking,
+    bool clearDucking = false,
   }) => Track(
     id: id ?? this.id,
     type: type ?? this.type,
@@ -269,6 +278,7 @@ class Track {
     volume: volume ?? this.volume,
     solo: solo ?? this.solo,
     heightOverride: heightOverride ?? this.heightOverride,
+    ducking: clearDucking ? null : (ducking ?? this.ducking),
   );
 
   Map<String, dynamic> toJson() => {
@@ -282,6 +292,7 @@ class Track {
     if (volume != 1.0) 'volume': volume,
     if (solo) 'solo': true,
     if (heightOverride != null) 'height': heightOverride,
+    if (ducking != null) 'duck': ducking!.toJson(),
   };
 
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -300,6 +311,7 @@ class Track {
       volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
       solo: json['solo'] as bool? ?? false,
       heightOverride: (json['height'] as num?)?.toDouble(),
+      ducking: Ducking.fromJson((json['duck'] as Map?)?.cast<String, dynamic>()),
     );
   }
 

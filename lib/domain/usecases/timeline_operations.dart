@@ -30,11 +30,7 @@ abstract final class TimelineOperations {
 
   /// Cuts [clipId] at [at], producing two clips that together occupy exactly
   /// the original span.
-  static Result<Timeline> split(
-    Timeline timeline,
-    String clipId,
-    Duration at,
-  ) {
+  static Result<Timeline> split(Timeline timeline, String clipId, Duration at) {
     final found = timeline.findClip(clipId);
     if (found == null) {
       return const Result.err(InvalidEditFailure('Clip not found.'));
@@ -79,8 +75,9 @@ abstract final class TimelineOperations {
 
     // Animation on the right half restarts at zero, so keyframes shift back by
     // the length of the left half.
-    final rightTransform =
-        clip.transform.shifted(-leftDuration).clampedTo(rightDuration);
+    final rightTransform = clip.transform
+        .shifted(-leftDuration)
+        .clampedTo(rightDuration);
     final leftTransform = clip.transform.clampedTo(leftDuration);
     final rightMask = clip.mask.shifted(-leftDuration).clampedTo(rightDuration);
     final leftMask = clip.mask.clampedTo(leftDuration);
@@ -238,7 +235,9 @@ abstract final class TimelineOperations {
 
     if (clip is MediaClip) {
       final sourceDelta = TimeUtils.unscale(delta, clip.speed);
-      final newSourceIn = clip.reversed ? clip.sourceIn : clip.sourceIn + sourceDelta;
+      final newSourceIn = clip.reversed
+          ? clip.sourceIn
+          : clip.sourceIn + sourceDelta;
       if (newSourceIn < Duration.zero) {
         return const Result.err(
           InvalidEditFailure('No more source material at the head.'),
@@ -494,7 +493,11 @@ abstract final class TimelineOperations {
       AudioClip() => clip.copyWith(id: id, start: start, clearTransition: true),
       ImageClip() => clip.copyWith(id: id, start: start, clearTransition: true),
       TextClip() => clip.copyWith(id: id, start: start, clearTransition: true),
-      StickerClip() => clip.copyWith(id: id, start: start, clearTransition: true),
+      StickerClip() => clip.copyWith(
+        id: id,
+        start: start,
+        clearTransition: true,
+      ),
     };
   }
 
@@ -533,7 +536,9 @@ abstract final class TimelineOperations {
     );
     if (newDuration < AppConstants.minClipDuration) {
       return const Result.err(
-        InvalidEditFailure('That speed would make the clip shorter than a frame.'),
+        InvalidEditFailure(
+          'That speed would make the clip shorter than a frame.',
+        ),
       );
     }
 
@@ -701,9 +706,8 @@ abstract final class TimelineOperations {
   ) => _mapTransform(
     timeline,
     clipId,
-    (t) => t.copyWith(
-      opacity: t.opacity.withStatic(MathUtils.clamp01(opacity)),
-    ),
+    (t) =>
+        t.copyWith(opacity: t.opacity.withStatic(MathUtils.clamp01(opacity))),
   );
 
   static Result<Timeline> _mapTransform(
@@ -738,14 +742,18 @@ abstract final class TimelineOperations {
     return switch (channel) {
       TransformChannel.x => t.copyWith(x: t.x.withKeyframe(keyframe)),
       TransformChannel.y => t.copyWith(y: t.y.withKeyframe(keyframe)),
-      TransformChannel.scaleX =>
-        t.copyWith(scaleX: t.scaleX.withKeyframe(keyframe)),
-      TransformChannel.scaleY =>
-        t.copyWith(scaleY: t.scaleY.withKeyframe(keyframe)),
-      TransformChannel.rotation =>
-        t.copyWith(rotation: t.rotation.withKeyframe(keyframe)),
-      TransformChannel.opacity =>
-        t.copyWith(opacity: t.opacity.withKeyframe(keyframe)),
+      TransformChannel.scaleX => t.copyWith(
+        scaleX: t.scaleX.withKeyframe(keyframe),
+      ),
+      TransformChannel.scaleY => t.copyWith(
+        scaleY: t.scaleY.withKeyframe(keyframe),
+      ),
+      TransformChannel.rotation => t.copyWith(
+        rotation: t.rotation.withKeyframe(keyframe),
+      ),
+      TransformChannel.opacity => t.copyWith(
+        opacity: t.opacity.withKeyframe(keyframe),
+      ),
     };
   });
 
@@ -754,18 +762,26 @@ abstract final class TimelineOperations {
     String clipId,
     TransformChannel channel,
     Duration localTime,
-  ) => _mapTransform(timeline, clipId, (t) => switch (channel) {
-    TransformChannel.x => t.copyWith(x: t.x.withoutKeyframeAt(localTime)),
-    TransformChannel.y => t.copyWith(y: t.y.withoutKeyframeAt(localTime)),
-    TransformChannel.scaleX =>
-      t.copyWith(scaleX: t.scaleX.withoutKeyframeAt(localTime)),
-    TransformChannel.scaleY =>
-      t.copyWith(scaleY: t.scaleY.withoutKeyframeAt(localTime)),
-    TransformChannel.rotation =>
-      t.copyWith(rotation: t.rotation.withoutKeyframeAt(localTime)),
-    TransformChannel.opacity =>
-      t.copyWith(opacity: t.opacity.withoutKeyframeAt(localTime)),
-  });
+  ) => _mapTransform(
+    timeline,
+    clipId,
+    (t) => switch (channel) {
+      TransformChannel.x => t.copyWith(x: t.x.withoutKeyframeAt(localTime)),
+      TransformChannel.y => t.copyWith(y: t.y.withoutKeyframeAt(localTime)),
+      TransformChannel.scaleX => t.copyWith(
+        scaleX: t.scaleX.withoutKeyframeAt(localTime),
+      ),
+      TransformChannel.scaleY => t.copyWith(
+        scaleY: t.scaleY.withoutKeyframeAt(localTime),
+      ),
+      TransformChannel.rotation => t.copyWith(
+        rotation: t.rotation.withoutKeyframeAt(localTime),
+      ),
+      TransformChannel.opacity => t.copyWith(
+        opacity: t.opacity.withoutKeyframeAt(localTime),
+      ),
+    },
+  );
 
   // ── Effects ──────────────────────────────────────────────────────────
 
@@ -881,10 +897,8 @@ abstract final class TimelineOperations {
         i == index
             ? track.clips[i].copyWithBase(clearTransition: true)
             : i > index
-                ? track.clips[i].copyWithBase(
-                    start: track.clips[i].start + overlap,
-                  )
-                : track.clips[i],
+            ? track.clips[i].copyWithBase(start: track.clips[i].start + overlap)
+            : track.clips[i],
     ];
     return Result.ok(timeline.replaceTrack(track.withClips(restored)));
   }
@@ -1004,7 +1018,9 @@ abstract final class TimelineOperations {
 
     if (newDuration < AppConstants.minClipDuration) {
       return const Result.err(
-        InvalidEditFailure('That ramp would make the clip shorter than a frame.'),
+        InvalidEditFailure(
+          'That ramp would make the clip shorter than a frame.',
+        ),
       );
     }
 
@@ -1160,24 +1176,400 @@ abstract final class TimelineOperations {
   ) {
     if (clips.isEmpty) return Result.ok(timeline);
 
-    final anchor = clips
-        .map((c) => c.start)
-        .reduce((a, b) => a < b ? a : b);
+    final anchor = clips.map((c) => c.start).reduce((a, b) => a < b ? a : b);
     var next = timeline;
 
     for (final clip in clips) {
       final offset = clip.start - anchor;
-      final target = next.trackById(clip.trackId) ??
+      final target =
+          next.trackById(clip.trackId) ??
           next.tracks.where((t) => t.type.accepts(clip.kind)).firstOrNull;
       if (target == null) continue;
 
-      final placed = _withNewId(clip, at + offset)
-          .copyWithBase(trackId: target.id);
+      final placed = _withNewId(
+        clip,
+        at + offset,
+      ).copyWithBase(trackId: target.id);
       final result = insertClip(next, target.id, placed, at: at + offset);
       next = result.getOrElse(next);
     }
     return Result.ok(next);
   }
+
+  // ── Three-point trims ────────────────────────────────────────────────
+  //
+  // Trim moves a clip's edge. These three move something else instead, and
+  // they are what separates an NLE from a clip arranger:
+  //
+  //   slip  — the source window slides inside a fixed timeline slot: the clip
+  //           does not move and the programme length does not change, but a
+  //           different part of the take plays.
+  //   slide — the clip moves and its neighbours absorb the difference, so the
+  //           cut pattern around it stays intact.
+  //   roll  — one cut moves: one clip gets longer by exactly what the other
+  //           loses.
+  //
+  // All three are composed from `trimStart`/`trimEnd`/`move`, which already
+  // know how source windows, speed and reversal interact. The only thing that
+  // needs care is *ordering*: an edit that would momentarily overlap is
+  // rejected, so each case frees the space before it fills it.
+
+  /// Slides the source window inside a clip that keeps its timeline slot.
+  ///
+  /// Positive [by] plays a later part of the take. [sourceLimit] is the asset's
+  /// full duration when the caller knows it — the timeline cannot know it, so
+  /// without it only the lower bound is enforced.
+  static Result<Timeline> slip(
+    Timeline timeline,
+    String clipId,
+    Duration by, {
+    Duration? sourceLimit,
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+    if (clip is! MediaClip || clip is ImageClip) {
+      return const Result.err(
+        InvalidEditFailure('Only a video or audio clip has a source window.'),
+      );
+    }
+
+    // The gesture is measured on the timeline; the window moves in source
+    // time, which differs whenever the clip is sped up or slowed down.
+    final shift = TimeUtils.unscale(
+      TimeUtils.snapToFrame(by, timeline.fps),
+      clip.speed,
+    );
+    final span = clip.sourceDuration;
+    final maxIn = sourceLimit == null
+        ? null
+        : TimeUtils.max(sourceLimit - span, Duration.zero);
+
+    var newIn = clip.sourceIn + shift;
+    if (newIn < Duration.zero) newIn = Duration.zero;
+    if (maxIn != null && newIn > maxIn) newIn = maxIn;
+    if (newIn == clip.sourceIn) return Result.ok(timeline);
+
+    final slipped = switch (clip) {
+      VideoClip() => clip.copyWith(sourceIn: newIn),
+      AudioClip() => clip.copyWith(sourceIn: newIn),
+      _ => null,
+    };
+    if (slipped == null) {
+      return const Result.err(InvalidEditFailure('Cannot slip this clip.'));
+    }
+    return Result.ok(timeline.replaceTrack(track.replaceClip(slipped)));
+  }
+
+  /// Moves a clip between two neighbours, absorbing the move into them.
+  ///
+  /// The clip's content and length are untouched; the programme length is
+  /// untouched. Only the two surrounding cuts move.
+  static Result<Timeline> slide(Timeline timeline, String clipId, Duration by) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final delta = TimeUtils.snapToFrame(by, timeline.fps);
+    if (delta == Duration.zero) return Result.ok(timeline);
+
+    // `previousClipBefore` is strict, so a clip ending exactly where this one
+    // starts — the only case slide cares about — needs a tick of slack.
+    final previous = track.previousClipBefore(clip.start + _tick);
+    final next = track.nextClipAfter(clip.end - _tick);
+    if (previous == null || previous.end != clip.start) {
+      return const Result.err(
+        InvalidEditFailure(
+          'Slide needs a clip butted against this one\'s head.',
+        ),
+      );
+    }
+    if (next == null || next.start != clip.end) {
+      return const Result.err(
+        InvalidEditFailure(
+          'Slide needs a clip butted against this one\'s tail.',
+        ),
+      );
+    }
+    if (previous.locked || next.locked) {
+      return const Result.err(
+        InvalidEditFailure('A neighbouring clip is locked.'),
+      );
+    }
+
+    // `trimStart`/`trimEnd` clamp rather than refuse, which is right when a
+    // user is dragging an edge but wrong here: a clamped slide would move the
+    // clip a different distance than asked and quietly desync the two cuts.
+    final headroom = _slideLimits(previous, next);
+    if (delta < headroom.$1 || delta > headroom.$2) {
+      return const Result.err(
+        InvalidEditFailure('A neighbouring clip would be too short.'),
+      );
+    }
+
+    // Free the space on the side we are moving towards before moving into it.
+    final steps = delta > Duration.zero
+        ? <Result<Timeline> Function(Timeline)>[
+            (t) => trimStart(t, next.id, next.start + delta),
+            (t) => move(t, clipId, clip.start + delta),
+            (t) => trimEnd(t, previous.id, previous.end + delta),
+          ]
+        : <Result<Timeline> Function(Timeline)>[
+            (t) => trimEnd(t, previous.id, previous.end + delta),
+            (t) => move(t, clipId, clip.start + delta),
+            (t) => trimStart(t, next.id, next.start + delta),
+          ];
+
+    return _sequence(timeline, steps);
+  }
+
+  /// Moves a single cut, lengthening one clip by exactly what the other loses.
+  ///
+  /// [atStart] rolls the cut at the clip's head instead of its tail.
+  static Result<Timeline> roll(
+    Timeline timeline,
+    String clipId,
+    Duration by, {
+    bool atStart = false,
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final delta = TimeUtils.snapToFrame(by, timeline.fps);
+    if (delta == Duration.zero) return Result.ok(timeline);
+
+    // Name the two sides of the cut, then the logic is the same either way:
+    // `left` gives up what `right` gains, or the reverse.
+    final Clip left;
+    final Clip right;
+    if (atStart) {
+      final previous = track.previousClipBefore(clip.start + _tick);
+      if (previous == null || previous.end != clip.start) {
+        return const Result.err(
+          InvalidEditFailure('There is no cut at this clip\'s head to roll.'),
+        );
+      }
+      left = previous;
+      right = clip;
+    } else {
+      final next = track.nextClipAfter(clip.end - _tick);
+      if (next == null || next.start != clip.end) {
+        return const Result.err(
+          InvalidEditFailure('There is no cut at this clip\'s tail to roll.'),
+        );
+      }
+      left = clip;
+      right = next;
+    }
+    if (left.locked || right.locked) {
+      return const Result.err(
+        InvalidEditFailure('A clip at this cut is locked.'),
+      );
+    }
+
+    // Same reason as slide: refuse rather than let the underlying trims clamp
+    // to something the user did not ask for.
+    final headroom = _slideLimits(left, right);
+    if (delta < headroom.$1 || delta > headroom.$2) {
+      return const Result.err(
+        InvalidEditFailure('The cut cannot move that far.'),
+      );
+    }
+
+    final cut = left.end;
+    final steps = delta > Duration.zero
+        ? <Result<Timeline> Function(Timeline)>[
+            (t) => trimStart(t, right.id, cut + delta),
+            (t) => trimEnd(t, left.id, cut + delta),
+          ]
+        : <Result<Timeline> Function(Timeline)>[
+            (t) => trimEnd(t, left.id, cut + delta),
+            (t) => trimStart(t, right.id, cut + delta),
+          ];
+
+    return _sequence(timeline, steps);
+  }
+
+  /// How far a cut between [left] and [right] may travel before one of them
+  /// falls below the minimum clip length, as `(most negative, most positive)`.
+  static (Duration, Duration) _slideLimits(Clip left, Clip right) => (
+    AppConstants.minClipDuration - left.duration,
+    right.duration - AppConstants.minClipDuration,
+  );
+
+  /// Runs [steps] in order, failing the whole edit if any step fails.
+  ///
+  /// A partially applied compound edit would be worse than none — the user
+  /// would have to undo something they never asked for.
+  static Result<Timeline> _sequence(
+    Timeline timeline,
+    List<Result<Timeline> Function(Timeline)> steps,
+  ) {
+    var next = timeline;
+    for (final step in steps) {
+      final result = step(next);
+      if (result is Err<Timeline>) return result;
+      next = result.getOrElse(next);
+    }
+    return Result.ok(next);
+  }
+
+  /// One microsecond — used to look "just inside" a clip when asking a track
+  /// what comes next, so the clip does not find itself.
+  static const _tick = Duration(microseconds: 1);
+
+  // ── Razor across many cuts ───────────────────────────────────────────
+
+  /// Cuts every clip in [clipIds] at every time in [times].
+  ///
+  /// This is what turns detected beats into an edit. Times that fall outside a
+  /// clip, or too close to an edge to leave a usable piece, are skipped rather
+  /// than failing the batch — a beat track always has some beats that land in
+  /// silence.
+  ///
+  /// Cuts are applied latest-first so that earlier times still refer to the
+  /// same piece of media: splitting at 2s changes what lives at 5s, but
+  /// splitting at 5s never changes what lives at 2s.
+  static Result<Timeline> razor(
+    Timeline timeline,
+    Iterable<Duration> times, {
+    Iterable<String>? clipIds,
+  }) {
+    final sorted = times.toList()..sort();
+    if (sorted.isEmpty) {
+      return const Result.err(InvalidEditFailure('No cut points.'));
+    }
+
+    final targets = clipIds?.toSet();
+    var next = timeline;
+    var cuts = 0;
+
+    for (final at in sorted.reversed) {
+      for (final track in next.tracks) {
+        if (track.locked) continue;
+        final clip = track.clipAt(at);
+        if (clip == null || clip.locked) continue;
+        if (targets != null && !targets.contains(clip.id)) continue;
+
+        final result = split(next, clip.id, at);
+        result.fold((updated) {
+          next = updated;
+          cuts++;
+        }, (_) {});
+      }
+    }
+
+    if (cuts == 0) {
+      return const Result.err(
+        InvalidEditFailure('No cut point landed inside a clip.'),
+      );
+    }
+    return Result.ok(next);
+  }
+
+  // ── Ken Burns ────────────────────────────────────────────────────────
+
+  /// Animates a slow push and drift across a still, as keyframes.
+  ///
+  /// Deliberately expressed as ordinary transform keyframes rather than a
+  /// special clip property: the user can then open the keyframe editor and
+  /// change the move, and every other part of the app — preview, export,
+  /// speed changes — already handles keyframes.
+  ///
+  /// [zoom] is the total scale change over the clip (0.15 = a 15% push).
+  static Result<Timeline> kenBurns(
+    Timeline timeline,
+    String clipId, {
+    KenBurnsMove move = KenBurnsMove.zoomIn,
+    double zoom = 0.18,
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+    if (clip.duration <= Duration.zero) {
+      return const Result.err(InvalidEditFailure('This clip has no length.'));
+    }
+
+    final amount = zoom.clamp(0.02, 1.0);
+    final end = clip.duration;
+
+    // Scaling up is what makes panning possible at all: at scale 1 there is
+    // nothing outside the frame to pan into, so a pure pan still zooms a
+    // little and then travels within that headroom.
+    final (fromScale, toScale) = switch (move) {
+      KenBurnsMove.zoomIn => (1.0, 1.0 + amount),
+      KenBurnsMove.zoomOut => (1.0 + amount, 1.0),
+      _ => (1.0 + amount, 1.0 + amount),
+    };
+
+    // Travel is limited by the headroom the scale actually creates, so the
+    // frame edge is never exposed.
+    final headroom = (amount / (1 + amount)) * 0.5;
+    final (fromX, toX, fromY, toY) = switch (move) {
+      KenBurnsMove.panLeft => (headroom, -headroom, 0.0, 0.0),
+      KenBurnsMove.panRight => (-headroom, headroom, 0.0, 0.0),
+      KenBurnsMove.panUp => (0.0, 0.0, headroom, -headroom),
+      KenBurnsMove.panDown => (0.0, 0.0, -headroom, headroom),
+      _ => (0.0, 0.0, 0.0, 0.0),
+    };
+
+    // A channel that does not move stays static. Emitting two identical
+    // keyframes would make `isAnimated` true and put a pointless track in the
+    // keyframe editor.
+    AnimatableDouble ramp(double from, double to) => from == to
+        ? AnimatableDouble(from)
+        : AnimatableDouble(
+            from,
+            keyframes: [
+              // Ease at both ends: a Ken Burns move that starts and stops abruptly
+              // reads as a glitch rather than a camera.
+              Keyframe(time: Duration.zero, value: from),
+              Keyframe(time: end, value: to),
+            ],
+          );
+
+    final animated = clip.transform.copyWith(
+      scaleX: ramp(fromScale, toScale),
+      scaleY: ramp(fromScale, toScale),
+      x: ramp(fromX, toX),
+      y: ramp(fromY, toY),
+    );
+
+    return Result.ok(
+      timeline.replaceTrack(
+        track.replaceClip(clip.copyWithBase(transform: animated)),
+      ),
+    );
+  }
+
+  /// Clears every transform keyframe, leaving the value the clip starts on.
+  static Result<Timeline> clearMotion(Timeline timeline, String clipId) =>
+      _mapClip(
+        timeline,
+        clipId,
+        (clip) => clip.copyWithBase(transform: clip.transform.frozen()),
+      );
 
   static Result<Timeline> _mapClip(
     Timeline timeline,
@@ -1209,6 +1601,22 @@ abstract final class TimelineOperations {
       effects.map((e) => e.timeScaled(factor)).toList();
 
   const TimelineOperations._();
+}
+
+/// The canned camera moves offered for stills.
+enum KenBurnsMove {
+  zoomIn('Zoom in'),
+  zoomOut('Zoom out'),
+  panLeft('Pan left'),
+  panRight('Pan right'),
+  panUp('Pan up'),
+  panDown('Pan down');
+
+  const KenBurnsMove(this.label);
+  final String label;
+
+  bool get isZoom =>
+      this == KenBurnsMove.zoomIn || this == KenBurnsMove.zoomOut;
 }
 
 /// The animatable channels of a [Transform2D], addressable by the UI.

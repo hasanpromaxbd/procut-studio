@@ -738,6 +738,7 @@ final class ImageClip extends MediaClip {
     transform: transform ?? this.transform,
     effects: effects ?? this.effects,
     outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
+    mask: mask ?? this.mask,
   );
 
   @override

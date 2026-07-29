@@ -33,10 +33,14 @@ import '../home/templates_screen.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/mask_sheet.dart';
+import 'sheets/mixer_sheet.dart';
+import 'sheets/motion_sheet.dart';
 import 'sheets/record_sheet.dart';
+import 'sheets/rhythm_sheet.dart';
 import 'sheets/speed_sheet.dart';
 import 'sheets/text_sheet.dart';
 import 'sheets/transition_sheet.dart';
+import 'sheets/trim_sheet.dart';
 
 class EditorScreen extends ConsumerStatefulWidget {
   const EditorScreen({required this.projectId, super.key});
@@ -425,6 +429,34 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       case _ToolAction.reverse:
         controller.reverseSelected();
 
+      case _ToolAction.trim:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: TrimSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.motion:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: MotionSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.rhythm:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: RhythmSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.mixer:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: MixerSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.addTrack:
         if (!mounted) return;
         final type = await showModalBottomSheet<TrackType>(
@@ -662,6 +694,10 @@ enum _ToolAction {
   flip,
   freeze,
   reverse,
+  trim,
+  motion,
+  rhythm,
+  mixer,
   addTrack,
 }
 
@@ -771,6 +807,28 @@ class _ToolRail extends ConsumerWidget {
         label: 'Reverse',
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.reverse),
+      ),
+      ToolIconButton(
+        icon: Icons.swap_horiz_rounded,
+        label: 'Trim',
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.trim),
+      ),
+      ToolIconButton(
+        icon: Icons.videocam_rounded,
+        label: 'Motion',
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.motion),
+      ),
+      ToolIconButton(
+        icon: Icons.graphic_eq_rounded,
+        label: 'Beats',
+        onPressed: () => onAction(_ToolAction.rhythm),
+      ),
+      ToolIconButton(
+        icon: Icons.tune_rounded,
+        label: 'Mixer',
+        onPressed: () => onAction(_ToolAction.mixer),
       ),
       ToolIconButton(
         icon: Icons.copy_rounded,

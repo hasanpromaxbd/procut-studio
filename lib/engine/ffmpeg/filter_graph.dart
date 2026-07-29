@@ -8,6 +8,8 @@ library;
 
 import 'dart:math' as math;
 
+import '../../domain/entities/ducking.dart';
+
 /// One filter invocation, e.g. `scale=w=1080:h=1920:flags=lanczos`.
 class Filter {
   Filter(this.name, [Map<String, Object?>? params])
@@ -67,9 +69,13 @@ class FilterChain {
     List<String>? inputs,
     List<Filter>? filters,
     List<String>? outputs,
-  }) : inputs = inputs ?? [],
-       filters = filters ?? [],
-       outputs = outputs ?? [];
+  })  // Copied, not aliased. A caller that keeps working with the list it
+      // passed in — popping labels off a split's outputs, say — would
+      // otherwise silently rewrite this chain and emit a graph whose labels
+      // go nowhere.
+      : inputs = [...?inputs],
+        filters = [...?filters],
+        outputs = [...?outputs];
 
   final List<String> inputs;
   final List<Filter> filters;
@@ -415,6 +421,25 @@ abstract final class Filters {
   static Filter audioDelay(Duration delay) => Filter('adelay', {
     'delays': '${delay.inMilliseconds}',
     'all': 1,
+  });
+
+  /// Side-chain compression: the second input controls the first.
+  ///
+  /// `level_sc` is left at its default because the key branch has already been
+  /// through the same gain staging as the audible one — scaling it here would
+  /// make the duck depend on the voice track's fader, which is surprising.
+  static Filter sidechainCompress(Ducking duck) => Filter('sidechaincompress', {
+    'threshold': FilterGraph.formatDouble(duck.sensitivity.clamp(1e-4, 1.0)),
+    'ratio': FilterGraph.formatDouble(duck.strength.clamp(1.0, 20.0)),
+    'attack': FilterGraph.formatDouble(
+      duck.attack.inMicroseconds / 1000.0,
+    ),
+    'release': FilterGraph.formatDouble(
+      duck.release.inMicroseconds / 1000.0,
+    ),
+    // Compression that also makes up gain would push the music back up
+    // between words, which is the opposite of ducking.
+    'makeup': 1,
   });
 
   static Filter mixAudio(int inputs, {String duration = 'longest'}) =>

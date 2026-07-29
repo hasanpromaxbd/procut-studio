@@ -12,11 +12,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
+import '../../core/error/failure.dart';
 import '../../core/error/result.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/utils/debouncer.dart';
 import '../../core/utils/id_generator.dart';
 import '../../domain/entities/clip.dart';
+import '../../domain/entities/ducking.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/keyframe.dart';
 import '../../domain/entities/marker.dart';
@@ -329,12 +331,10 @@ class EditorController extends Notifier<EditorState?> {
 
   // ── Masking ──────────────────────────────────────────────────────────
 
-  void setMask(Mask mask) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(TimelineOperations.setMask(current.timeline, clipId, mask), 'mask');
-  }
+  void setMask(Mask mask) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.setMask(timeline, clipId, mask),
+    'mask',
+  );
 
   // ── Speed ramping ────────────────────────────────────────────────────
 
@@ -502,23 +502,83 @@ class EditorController extends Notifier<EditorState?> {
     state = current.copyWith(clearMessages: true);
   }
 
+  /// Applies [operation] to every selected clip, in one undo step.
+  ///
+  /// Multi-select is not decoration: if three clips are selected, a speed
+  /// change must hit all three. Folding here means each command stays a single
+  /// line and cannot forget the rest of the selection.
+  ///
+  /// A clip the operation rejects (locked, wrong kind) is skipped rather than
+  /// aborting the batch — selecting a mixed bag and speeding up "the video
+  /// ones" is a reasonable thing to do.
+  void _applyToSelection(
+    Result<Timeline> Function(Timeline timeline, String clipId) operation,
+    String label, {
+    String? emptyMessage,
+  }) {
+    final current = state;
+    if (current == null || !current.hasSelection) return;
+
+    var timeline = current.timeline;
+    var applied = 0;
+    Failure? lastFailure;
+
+    for (final clipId in current.selectedClipIds) {
+      final result = operation(timeline, clipId);
+      result.fold(
+        (next) {
+          timeline = next;
+          applied++;
+        },
+        (failure) => lastFailure = failure,
+      );
+    }
+
+    if (applied == 0) {
+      state = current.copyWith(
+        errorMessage:
+            emptyMessage ?? lastFailure?.message ?? 'That does not apply here.',
+      );
+      return;
+    }
+
+    _apply(
+      Result.ok(timeline),
+      applied > 1 ? '$label ($applied clips)' : label,
+    );
+  }
+
   // ── Structural edits ─────────────────────────────────────────────────
 
   void splitAtPlayhead() {
     final current = state;
-    final clipId = current?.selectedClipId;
     if (current == null) return;
 
     final playhead = ref.read(playheadControllerProvider).position;
 
     // With nothing selected, split whatever is under the playhead on the
     // topmost visual track — the thing the user is looking at.
-    final target = clipId ?? _clipUnderPlayhead(current.timeline, playhead)?.id;
-    if (target == null) {
-      state = current.copyWith(errorMessage: 'Nothing to split at the playhead.');
+    if (!current.hasSelection) {
+      final under = _clipUnderPlayhead(current.timeline, playhead)?.id;
+      if (under == null) {
+        state =
+            current.copyWith(errorMessage: 'Nothing to split at the playhead.');
+        return;
+      }
+      _apply(
+        TimelineOperations.split(current.timeline, under, playhead),
+        'split',
+      );
       return;
     }
-    _apply(TimelineOperations.split(current.timeline, target, playhead), 'split');
+
+    // Selected clips that the playhead does not cross are simply not split;
+    // this is the razor-across-the-selection behaviour an editor expects.
+    _applyToSelection(
+      (timeline, clipId) => TimelineOperations.split(timeline, clipId, playhead),
+      'split',
+      emptyMessage: 'The playhead is not over any selected clip.',
+    );
   }
 
   Clip? _clipUnderPlayhead(Timeline timeline, Duration playhead) {
@@ -616,40 +676,27 @@ class EditorController extends Notifier<EditorState?> {
     state = state?.copyWith(clearSelection: true);
   }
 
-  void duplicateSelected() {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(TimelineOperations.duplicate(current.timeline, clipId), 'duplicate');
-  }
+  void duplicateSelected() => _applyToSelection(
+    TimelineOperations.duplicate,
+    'duplicate',
+  );
 
-  void setSpeed(double speed) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(
-      TimelineOperations.setSpeed(current.timeline, clipId, speed),
-      'speed',
-    );
-  }
+  void setSpeed(double speed) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.setSpeed(timeline, clipId, speed),
+    'speed',
+  );
 
-  void reverseSelected() {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(TimelineOperations.reverse(current.timeline, clipId), 'reverse');
-  }
+  void reverseSelected() =>
+      _applyToSelection(TimelineOperations.reverse, 'reverse');
 
   void freezeFrameAtPlayhead({
     Duration hold = const Duration(seconds: 2),
   }) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
     final playhead = ref.read(playheadControllerProvider).position;
-    _apply(
-      TimelineOperations.freezeFrame(
-        current.timeline,
+    _applyToSelection(
+      (timeline, clipId) => TimelineOperations.freezeFrame(
+        timeline,
         clipId,
         playhead,
         holdDuration: hold,
@@ -658,93 +705,187 @@ class EditorController extends Notifier<EditorState?> {
     );
   }
 
-  void rotateSelected({int quarterTurns = 1}) {
+  void rotateSelected({int quarterTurns = 1}) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.rotate(
+      timeline,
+      clipId,
+      quarterTurns: quarterTurns,
+    ),
+    'rotate',
+  );
+
+  void flipSelected({required bool horizontal}) => _applyToSelection(
+    (timeline, clipId) => horizontal
+        ? TimelineOperations.flipHorizontal(timeline, clipId)
+        : TimelineOperations.flipVertical(timeline, clipId),
+    'flip',
+  );
+
+  void cropSelected(CropRect crop) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.crop(timeline, clipId, crop),
+    'crop',
+  );
+
+  void setOpacity(double opacity) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.setOpacity(timeline, clipId, opacity),
+    'opacity',
+  );
+
+  // ── Three-point trims ────────────────────────────────────────────────
+
+  /// Slides the source window without moving the clip.
+  ///
+  /// The asset's full length is passed in so the window cannot run past the
+  /// end of the take — the timeline does not know how long the file is.
+  void slipSelected(Duration by) {
     final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(
-      TimelineOperations.rotate(
-        current.timeline,
-        clipId,
-        quarterTurns: quarterTurns,
+    if (current == null) return;
+
+    _applyToSelection(
+      (timeline, clipId) {
+        final clip = timeline.findClip(clipId)?.$2;
+        final limit = clip is MediaClip
+            ? current.project.asset(clip.assetId)?.duration
+            : null;
+        return TimelineOperations.slip(
+          timeline,
+          clipId,
+          by,
+          sourceLimit: limit,
+        );
+      },
+      'slip',
+    );
+  }
+
+  /// Moves the clip and lets its neighbours absorb the difference.
+  void slideSelected(Duration by) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.slide(timeline, clipId, by),
+    'slide',
+  );
+
+  /// Moves one cut, trading length between the two clips that share it.
+  void rollSelected(Duration by, {bool atStart = false}) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.roll(timeline, clipId, by, atStart: atStart),
+    'roll',
+  );
+
+  // ── Beat-synced cutting ──────────────────────────────────────────────
+
+  /// Razors the selection at every beat marker, in one undo step.
+  ///
+  /// With nothing selected it cuts everything the beats cross, which is the
+  /// "chop the whole edit to the music" gesture. Returns how many cuts landed
+  /// so the caller can say something truthful instead of a bare "done".
+  int cutOnBeats({MarkerKind kind = MarkerKind.beat, int everyNth = 1}) {
+    final current = state;
+    if (current == null) return 0;
+
+    var beats = current.timeline.markers
+        .where((m) => m.kind == kind)
+        .map((m) => m.time)
+        .toList()
+      ..sort();
+
+    if (beats.isEmpty) {
+      state = current.copyWith(
+        errorMessage: 'Detect beats first — there are no beat markers.',
+      );
+      return 0;
+    }
+
+    // Cutting on every beat of a 120 BPM track gives a cut twice a second,
+    // which is rarely what anyone wants; taking every nth beat is how the bar
+    // gets picked out.
+    if (everyNth > 1) {
+      beats = [
+        for (var i = 0; i < beats.length; i += everyNth) beats[i],
+      ];
+    }
+
+    final before = current.timeline.clipCount;
+    _applyWholeTimeline(
+      (timeline) => TimelineOperations.razor(
+        timeline,
+        beats,
+        clipIds: current.hasSelection ? current.selectedClipIds : null,
       ),
-      'rotate',
+      'cut on beats',
     );
+    return (state?.timeline.clipCount ?? before) - before;
   }
 
-  void flipSelected({required bool horizontal}) {
+  /// Applies a whole-timeline operation with the standard history handling.
+  void _applyWholeTimeline(
+    Result<Timeline> Function(Timeline timeline) operation,
+    String label,
+  ) {
     final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(
-      horizontal
-          ? TimelineOperations.flipHorizontal(current.timeline, clipId)
-          : TimelineOperations.flipVertical(current.timeline, clipId),
-      'flip',
-    );
+    if (current == null) return;
+    _apply(operation(current.timeline), label);
   }
 
-  void cropSelected(CropRect crop) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(TimelineOperations.crop(current.timeline, clipId, crop), 'crop');
-  }
+  // ── Ken Burns ────────────────────────────────────────────────────────
 
-  void setOpacity(double opacity) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    _apply(
-      TimelineOperations.setOpacity(current.timeline, clipId, opacity),
-      'opacity',
-    );
-  }
+  /// Adds a slow camera move to the selected stills.
+  void applyKenBurns({
+    KenBurnsMove move = KenBurnsMove.zoomIn,
+    double zoom = 0.18,
+  }) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.kenBurns(timeline, clipId, move: move, zoom: zoom),
+    move.label.toLowerCase(),
+  );
+
+  /// Removes every transform keyframe from the selection.
+  void clearMotion() =>
+      _applyToSelection(TimelineOperations.clearMotion, 'clear motion');
 
   // ── Keyframes ────────────────────────────────────────────────────────
 
   void setKeyframeAtPlayhead(TransformChannel channel, double value) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-
-    final found = current.timeline.findClip(clipId);
-    if (found == null) return;
     final playhead = ref.read(playheadControllerProvider).position;
-    final local = found.$2.localTime(playhead);
-    if (local < Duration.zero || local > found.$2.duration) {
-      state = current.copyWith(
-        errorMessage: 'Move the playhead over the clip to add a keyframe.',
-      );
-      return;
-    }
+    _applyToSelection(
+      (timeline, clipId) {
+        final found = timeline.findClip(clipId);
+        if (found == null) return Result.err(const InvalidEditFailure('clip not found'));
 
-    _apply(
-      TimelineOperations.setTransformKeyframe(
-        current.timeline,
-        clipId,
-        channel,
-        local,
-        value,
-      ),
+        // The keyframe lives in clip-local time, so a clip the playhead is
+        // not over has no valid position for one.
+        final local = found.$2.localTime(playhead);
+        if (local < Duration.zero || local > found.$2.duration) {
+          return Result.err(
+            const InvalidEditFailure('the playhead is outside the clip'),
+          );
+        }
+        return TimelineOperations.setTransformKeyframe(
+          timeline,
+          clipId,
+          channel,
+          local,
+          value,
+        );
+      },
       'keyframe',
+      emptyMessage: 'Move the playhead over the clip to add a keyframe.',
     );
   }
 
   void removeKeyframeAtPlayhead(TransformChannel channel) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-    final found = current.timeline.findClip(clipId);
-    if (found == null) return;
     final playhead = ref.read(playheadControllerProvider).position;
-    _apply(
-      TimelineOperations.removeTransformKeyframe(
-        current.timeline,
-        clipId,
-        channel,
-        found.$2.localTime(playhead),
-      ),
+    _applyToSelection(
+      (timeline, clipId) {
+        final found = timeline.findClip(clipId);
+        if (found == null) return Result.err(const InvalidEditFailure('clip not found'));
+        return TimelineOperations.removeTransformKeyframe(
+          timeline,
+          clipId,
+          channel,
+          found.$2.localTime(playhead),
+        );
+      },
       'remove keyframe',
     );
   }
@@ -752,15 +893,13 @@ class EditorController extends Notifier<EditorState?> {
   // ── Effects & transitions ────────────────────────────────────────────
 
   void addEffect(EffectType type) {
-    final current = state;
-    final clipId = current?.selectedClipId;
-    if (current == null || clipId == null) return;
-
     final spec = EffectCatalog.specFor(type);
     if (spec == null) return;
-    _apply(
-      TimelineOperations.addEffect(
-        current.timeline,
+    // A fresh instance per clip: sharing one would make them share an id, and
+    // editing one would silently edit them all.
+    _applyToSelection(
+      (timeline, clipId) => TimelineOperations.addEffect(
+        timeline,
         clipId,
         spec.instantiate(IdGenerator.effect()),
       ),
@@ -1195,6 +1334,57 @@ class EditorController extends Notifier<EditorState?> {
         current.timeline.replaceTrack(track.copyWith(muted: !track.muted)),
       ),
       track.muted ? 'unmute track' : 'mute track',
+    );
+  }
+
+  void toggleTrackSolo(String trackId) {
+    final current = state;
+    final track = current?.timeline.trackById(trackId);
+    if (current == null || track == null) return;
+    _apply(
+      Result.ok(
+        current.timeline.replaceTrack(track.copyWith(solo: !track.solo)),
+      ),
+      track.solo ? 'unsolo track' : 'solo track',
+    );
+  }
+
+  void setTrackVolume(String trackId, double volume) {
+    final current = state;
+    final track = current?.timeline.trackById(trackId);
+    if (current == null || track == null) return;
+    _apply(
+      Result.ok(
+        current.timeline.replaceTrack(
+          track.copyWith(volume: volume.clamp(0.0, 2.0)),
+        ),
+      ),
+      'track volume',
+    );
+  }
+
+  /// Sets or clears automatic ducking on a track. Pass null to turn it off.
+  void setTrackDucking(String trackId, Ducking? ducking) {
+    final current = state;
+    final track = current?.timeline.trackById(trackId);
+    if (current == null || track == null) return;
+
+    if (ducking != null && ducking.keyTrackId == trackId) {
+      state = current.copyWith(
+        errorMessage: 'A track cannot duck under itself.',
+      );
+      return;
+    }
+
+    _apply(
+      Result.ok(
+        current.timeline.replaceTrack(
+          ducking == null
+              ? track.copyWith(clearDucking: true)
+              : track.copyWith(ducking: ducking),
+        ),
+      ),
+      ducking == null ? 'stop ducking' : 'duck track',
     );
   }
 

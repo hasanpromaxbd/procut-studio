@@ -180,6 +180,19 @@ class Transform2D {
     blendMode: blendMode,
   );
 
+  /// Drops every keyframe, keeping each channel at the value it starts on.
+  ///
+  /// "Remove the animation" has to mean *some* value survives; the first
+  /// keyframe is the one the user set deliberately and saw on screen.
+  Transform2D frozen() => copyWith(
+    x: AnimatableDouble(x.valueAt(Duration.zero)),
+    y: AnimatableDouble(y.valueAt(Duration.zero)),
+    scaleX: AnimatableDouble(scaleX.valueAt(Duration.zero)),
+    scaleY: AnimatableDouble(scaleY.valueAt(Duration.zero)),
+    rotation: AnimatableDouble(rotation.valueAt(Duration.zero)),
+    opacity: AnimatableDouble(opacity.valueAt(Duration.zero)),
+  );
+
   Transform2D copyWith({
     AnimatableDouble? x,
     AnimatableDouble? y,

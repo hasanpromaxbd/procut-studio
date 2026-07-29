@@ -33,6 +33,7 @@ import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/project.dart';
 import '../../domain/entities/text_style_spec.dart';
+import '../../domain/entities/timeline.dart';
 import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
@@ -860,7 +861,10 @@ class TimelineCompiler {
     required List<String> warnings,
   }) {
     final timeline = project.timeline;
-    final stemLabels = <String>[];
+    // Stems are collected per track, not into one flat list, because ducking
+    // needs a whole track as the key signal — one clip's stem is not "the
+    // voice", the voice track is.
+    final stemsByTrack = <String, List<String>>{};
 
     for (final track in timeline.tracks) {
       if (!timeline.isTrackAudible(track)) continue;
@@ -998,12 +1002,27 @@ class TimelineCompiler {
           )
           ..then(Filters.audioPad(timelineDuration));
 
-        stemLabels.add(label);
+        stemsByTrack.putIfAbsent(track.id, () => []).add(label);
       }
     }
 
-    if (stemLabels.isEmpty) return null;
+    final totalStems = stemsByTrack.values.fold(0, (a, b) => a + b.length);
+    if (totalStems == 0) return null;
 
+    // One label per track, so ducking has something whole to work with.
+    final trackMix = <String, String>{
+      for (final entry in stemsByTrack.entries)
+        entry.key: _mergeStems(graph, entry.value),
+    };
+
+    final ducked = _applyDucking(
+      graph: graph,
+      timeline: timeline,
+      trackMix: trackMix,
+      warnings: warnings,
+    );
+
+    final stemLabels = ducked.values.toList();
     final mixed = graph.newLabel('aout');
     if (stemLabels.length == 1) {
       graph
@@ -1016,15 +1035,97 @@ class TimelineCompiler {
           .then(Filters.mixAudio(stemLabels.length))
           .then(Filters.atrim(Duration.zero, timelineDuration))
           .then(Filters.resetAudioPts());
+    }
 
-      if (stemLabels.length > 8) {
-        warnings.add(
-          'This project mixes ${stemLabels.length} audio sources; '
-          'the export will take longer than usual.',
-        );
-      }
+    if (totalStems > 8) {
+      warnings.add(
+        'This project mixes $totalStems audio sources; '
+        'the export will take longer than usual.',
+      );
     }
     return mixed;
+  }
+
+  /// Collapses a track's clip stems into one label.
+  static String _mergeStems(FilterGraph graph, List<String> stems) {
+    if (stems.length == 1) return stems.single;
+    final label = graph.newLabel('atrk');
+    graph
+        .chain(inputs: stems, outputs: [label])
+        .then(Filters.mixAudio(stems.length));
+    return label;
+  }
+
+  /// Rewires ducked tracks through `sidechaincompress`.
+  ///
+  /// The key track's audio has to be heard *and* used as the trigger, so it is
+  /// split first: one branch drives the compressor, the other stays in the
+  /// mix. Forgetting the split is the classic mistake here — the voice
+  /// disappears from the export and only the ducking survives.
+  static Map<String, String> _applyDucking({
+    required FilterGraph graph,
+    required Timeline timeline,
+    required Map<String, String> trackMix,
+    required List<String> warnings,
+  }) {
+    final duckers = <Track>[
+      for (final track in timeline.tracks)
+        if (track.isDucked && trackMix.containsKey(track.id)) track,
+    ];
+    if (duckers.isEmpty) return trackMix;
+
+    final result = Map<String, String>.of(trackMix);
+
+    // How many key branches each key track must produce: one per track that
+    // ducks under it, plus one that stays audible.
+    final keyDemand = <String, int>{};
+    for (final track in duckers) {
+      final key = track.ducking!.keyTrackId;
+      if (!trackMix.containsKey(key) || key == track.id) continue;
+      keyDemand[key] = (keyDemand[key] ?? 0) + 1;
+    }
+
+    final keyBranches = <String, List<String>>{};
+    for (final entry in keyDemand.entries) {
+      // One branch per ducker, plus one that stays audible in the mix.
+      final branches = [
+        for (var i = 0; i <= entry.value; i++) graph.newLabel('akey'),
+      ];
+      graph
+          .chain(inputs: [trackMix[entry.key]!], outputs: branches)
+          .then(Filter('asplit')..arg('${branches.length}'));
+
+      result[entry.key] = branches.last;
+      keyBranches[entry.key] = branches.sublist(0, branches.length - 1);
+    }
+
+    for (final track in duckers) {
+      final duck = track.ducking!;
+      final key = duck.keyTrackId;
+      if (key == track.id) {
+        warnings.add(
+          'The ${track.displayName} track is set to duck under itself; '
+          'ducking was skipped for it.',
+        );
+        continue;
+      }
+      final branches = keyBranches[key];
+      if (branches == null || branches.isEmpty) {
+        warnings.add(
+          'The ${track.displayName} track ducks under a track with no audio; '
+          'ducking was skipped for it.',
+        );
+        continue;
+      }
+
+      final out = graph.newLabel('aduck');
+      graph
+          .chain(inputs: [result[track.id]!, branches.removeAt(0)], outputs: [out])
+          .then(Filters.sidechainCompress(duck));
+      result[track.id] = out;
+    }
+
+    return result;
   }
 }
 
