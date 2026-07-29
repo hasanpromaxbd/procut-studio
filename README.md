@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  193 tests, all passing
+flutter test                 →  199 tests, all passing
 flutter build apk --debug    →  built (174 MB, 3 ABIs)
 flutter build apk --release  →  built (110 MB, R8 + shrinker)
 ```
@@ -38,6 +38,7 @@ what is architected with a working seam but needs an external piece. See
 | Keyframe animation with easing curves | Implemented + tested — animates on export via `sendcmd` |
 | Speed ramping, shape masks, adjustment layers | Implemented + tested |
 | Multi-select, copy/paste, markers, templates | Implemented + tested |
+| Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |
 | 14 effects (blur, glow, VHS, RGB split, grain, LUT, …) | Implemented — GPU shader + FFmpeg filter |

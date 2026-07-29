@@ -22,6 +22,7 @@
 ///   those.
 library;
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
 
@@ -39,6 +40,7 @@ import '../../../domain/entities/transform2d.dart';
 import '../../../engine/render/layer_painter.dart';
 import '../../../engine/render/shader_library.dart';
 import '../../viewmodels/editor_controller.dart';
+import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
 
 /// Above this many simultaneous video layers we stop creating decoders.
@@ -72,6 +74,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   Widget build(BuildContext context) {
     final editor = ref.watch(editorControllerProvider(widget.projectId));
     final playhead = ref.watch(playheadControllerProvider);
+    final eyedropper = ref.watch(eyedropperProvider);
 
     if (editor == null) {
       return const ColoredBox(color: Colors.black);
@@ -95,30 +98,42 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           width = height * canvasAspect;
         }
 
+        final stage = RepaintBoundary(
+          // The boundary is what makes colour sampling possible: it gives the
+          // eyedropper something it can rasterise.
+          key: ref.read(eyedropperProvider.notifier).previewKey,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.all(Radius.circular(Radii.sm)),
+            child: ColoredBox(
+              color: Color(timeline.backgroundColor),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  for (var i = 0; i < visible.length; i++)
+                    _buildLayer(
+                      clip: visible[i],
+                      project: editor.project,
+                      playhead: playhead.position,
+                      canvasSize: Size(width, height),
+                      decoderBudgetExceeded: _videoLayerIndex(visible, i) >=
+                          _maxConcurrentDecoders,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+
         return Center(
           child: SizedBox(
             width: width,
             height: height,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.all(Radius.circular(Radii.sm)),
-              child: ColoredBox(
-                color: Color(timeline.backgroundColor),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    for (var i = 0; i < visible.length; i++)
-                      _buildLayer(
-                        clip: visible[i],
-                        project: editor.project,
-                        playhead: playhead.position,
-                        canvasSize: Size(width, height),
-                        decoderBudgetExceeded: _videoLayerIndex(visible, i) >=
-                            _maxConcurrentDecoders,
-                      ),
-                  ],
-                ),
-              ),
-            ),
+            child: eyedropper.isActive
+                ? _SamplingOverlay(
+                    projectId: widget.projectId,
+                    child: stage,
+                  )
+                : stage,
           ),
         );
       },
@@ -376,6 +391,112 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           controller.dispose();
         })
         .whenComplete(() => _initialising.remove(asset.id));
+  }
+}
+
+/// Wraps the preview while the eyedropper is armed: a crosshair cursor, a
+/// dimmed surround so it is obvious the next tap does something different, and
+/// the tap handler that performs the sample.
+class _SamplingOverlay extends ConsumerWidget {
+  const _SamplingOverlay({required this.projectId, required this.child});
+
+  final String projectId;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (details) => unawaited(_sample(context, ref, details)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          child,
+          IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: theme.colorScheme.secondary, width: 2),
+                borderRadius: const BorderRadius.all(Radius.circular(Radii.sm)),
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  margin: const EdgeInsets.all(Spacing.sm),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Spacing.md,
+                    vertical: Spacing.xs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.secondary,
+                    borderRadius: const BorderRadius.all(
+                      Radius.circular(Radii.pill),
+                    ),
+                  ),
+                  child: Text(
+                    'Tap the colour to key out',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sample(
+    BuildContext context,
+    WidgetRef ref,
+    TapDownDetails details,
+  ) async {
+    final notifier = ref.read(eyedropperProvider.notifier);
+    final effectId = ref.read(eyedropperProvider).targetEffectId;
+
+    final colour = await notifier.sampleAt(details.localPosition);
+    if (colour == null || effectId == null) return;
+
+    final editor = ref.read(editorControllerProvider(projectId));
+    final clipId = editor?.selectedClipId;
+    if (editor == null || clipId == null) return;
+
+    final found = editor.timeline.findClip(clipId);
+    final effect = found?.$2.effects.where((e) => e.id == effectId).firstOrNull;
+    if (effect == null) return;
+
+    ref.read(editorControllerProvider(projectId).notifier).updateEffect(
+          effect.withStringParam(
+            'key',
+            EyedropperController.toFfmpegColour(colour),
+          ),
+        );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Color(colour),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white54),
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+              Text('Keying ${EyedropperController.toFfmpegColour(colour)}'),
+            ],
+          ),
+        ),
+      );
+    }
   }
 }
 

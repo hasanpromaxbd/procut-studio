@@ -29,6 +29,7 @@ import '../../widgets/common/glass_panel.dart';
 import '../../widgets/editor/preview_stage.dart';
 import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
+import '../home/templates_screen.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/mask_sheet.dart';
@@ -240,6 +241,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           icon: const Icon(Icons.aspect_ratio_rounded),
           tooltip: 'Reframe for another aspect',
           onPressed: _reframe,
+        ),
+        IconButton(
+          icon: const Icon(Icons.dashboard_customize_outlined),
+          tooltip: 'Save as template',
+          onPressed: () =>
+              showSaveTemplateSheet(context, ref, widget.projectId),
         ),
         Padding(
           padding: const EdgeInsets.only(right: Spacing.sm, left: Spacing.xs),

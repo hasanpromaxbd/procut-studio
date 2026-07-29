@@ -21,6 +21,7 @@ import '../../../../domain/repositories/ai_repository.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
 import '../../settings/settings_screen.dart';
+import 'tracking_sheet.dart';
 
 class AiToolsSheet extends ConsumerStatefulWidget {
   const AiToolsSheet({required this.projectId, super.key});
@@ -190,6 +191,24 @@ class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
                       AiCapability.autoCaption,
                       () => _autoCaption(asset!, clip!),
                     ),
+                  ),
+                  _ToolTile(
+                    icon: Icons.my_location_rounded,
+                    title: 'Motion tracking',
+                    subtitle: 'Follow a subject and drive a sticker or title',
+                    enabled: (available.contains(AiCapability.objectTracking) ||
+                            available.contains(AiCapability.faceTracking)) &&
+                        clip is MediaClip &&
+                        _running == null,
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      unawaited(
+                        ToolSheet.show<void>(
+                          context,
+                          sheet: TrackingSheet(projectId: widget.projectId),
+                        ),
+                      );
+                    },
                   ),
                   _ToolTile(
                     icon: Icons.person_remove_rounded,

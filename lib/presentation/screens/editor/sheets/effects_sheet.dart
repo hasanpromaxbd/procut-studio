@@ -8,6 +8,7 @@ import '../../../../core/theme/app_dimens.dart';
 import '../../../../domain/entities/effect.dart';
 import '../../../../engine/effects/effect_catalog.dart';
 import '../../../viewmodels/editor_controller.dart';
+import '../../../viewmodels/eyedropper_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
 
 class EffectsSheet extends ConsumerWidget {
@@ -47,6 +48,14 @@ class EffectsSheet extends ConsumerWidget {
                 effect: effect,
                 onChanged: controller.updateEffect,
                 onRemove: () => controller.removeEffect(effect.id),
+                onPickKeyColour: effect.type == EffectType.chromaKey
+                    ? () {
+                        // Arm the eyedropper and get out of the way — the
+                        // sheet covers the preview the user needs to tap.
+                        ref.read(eyedropperProvider.notifier).begin(effect.id);
+                        Navigator.of(context).pop();
+                      }
+                    : null,
               ),
           ],
           const SectionHeader(title: 'Add an effect'),
@@ -95,11 +104,15 @@ class _AppliedEffectTile extends StatelessWidget {
     required this.effect,
     required this.onChanged,
     required this.onRemove,
+    this.onPickKeyColour,
   });
 
   final Effect effect;
   final ValueChanged<Effect> onChanged;
   final VoidCallback onRemove;
+
+  /// Only set for chroma key — arms the preview eyedropper.
+  final VoidCallback? onPickKeyColour;
 
   @override
   Widget build(BuildContext context) {
@@ -146,6 +159,48 @@ class _AppliedEffectTile extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onPickKeyColour != null) ...[
+                Builder(
+                  builder: (context) {
+                    final key = effect.stringParams['key'];
+                    final colour = key == null
+                        ? null
+                        : int.tryParse(key.replaceFirst('0x', ''), radix: 16);
+                    return Row(
+                      children: [
+                        Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: colour == null
+                                ? const Color(0xFF00FF00)
+                                : Color(0xFF000000 | colour),
+                            borderRadius: const BorderRadius.all(
+                              Radius.circular(6),
+                            ),
+                            border: Border.all(
+                              color: theme.colorScheme.outlineVariant,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: Spacing.sm),
+                        Expanded(
+                          child: Text(
+                            key ?? '0x00ff00 (default green)',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: onPickKeyColour,
+                          icon: const Icon(Icons.colorize_rounded, size: 18),
+                          label: const Text('Pick'),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: Spacing.sm),
+              ],
               for (final param in spec.params)
                 LabeledSlider(
                   label: param.label,

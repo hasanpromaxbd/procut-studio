@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 193 tests passing, debug and release
+Verified state: `flutter analyze` clean, 199 tests passing, debug and release
 APKs build.
 
 ---
@@ -38,7 +38,9 @@ APKs build.
 | Adjustment layers | Implemented + tested | `TrackType.adjustment`, gated by `enable` |
 | Stabilisation | Implemented + tested | Two-pass `vidstab`, see note 8 |
 | Auto-reframe | Implemented | Recentres on aspect change; follows tracking when supplied |
-| Project templates | Implemented + tested | Slot-based, preserves the edit's rhythm |
+| Project templates | Implemented + tested | Slot-based, browse/save UI, preserves the edit's rhythm |
+| Motion tracking → keyframes | Implemented + tested | Region or face; drives a sticker or title |
+| Chroma-key eyedropper | Implemented + tested | Samples the composited preview, see note 9 |
 | Platform export presets | Implemented + tested | Reels/Shorts/TikTok/YouTube/master |
 
 **Note 1 — reverse.** FFmpeg's `reverse` buffers the whole segment, so it runs
@@ -94,6 +96,13 @@ whose filter advertises command support. Three do not — **Sharpen**
 (`unsharp`), **Film grain** (`noise`) and **Vignette** — and those export at
 their first-frame value, with an export warning saying so. Verified against a
 real ffmpeg binary by `tool/verify_sendcmd.sh`.
+
+**Note 9 — the eyedropper.** The preview is a stack of platform video
+textures, so there is no pixel buffer to read. The colour is obtained by
+rasterising the preview's `RepaintBoundary` and reading one pixel out of it.
+That means the sample is what the preview *shows*, including effects already
+applied — which is normally what you want, since you are keying the graded
+picture rather than the raw source.
 
 ## Transitions
 
@@ -251,17 +260,10 @@ Worth stating plainly:
    shipping FFmpeg twice.
 3. **Preview caps at 4 concurrent video layers.** Android's decoder pool is
    small and device-dependent. Export is unaffected.
-4. **Some new features are engine-complete but thinly surfaced.** Motion
-   tracking converts to keyframes (`applyTracking`) and templates apply
-   correctly (`ProjectTemplate.apply`), both covered by tests, but neither has
-   a dedicated UI yet — tracking is reachable only through the AI sheet's
-   backend call, and templates have no browser. The chroma-key eyedropper is
-   also not built: the effect works, but the key colour must be set as a hex
-   string rather than picked off the preview.
-5. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette
+4. **Three effects cannot animate on export.** Sharpen, Film grain and Vignette
    use FFmpeg filters with no runtime-command support, so a keyframed one
    renders at its first-frame value. The export warns rather than silently
    flattening it.
-6. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
+5. **`file_picker` needs an AGP 9 shim.** See `android/build.gradle.kts` — the
    plugin skips applying the Kotlin plugin on AGP 9. Removable once upstream
    ships a fix.

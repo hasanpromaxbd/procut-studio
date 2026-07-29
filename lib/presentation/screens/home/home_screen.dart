@@ -17,6 +17,7 @@ import '../../viewmodels/home_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 import '../editor/editor_screen.dart';
 import '../settings/settings_screen.dart';
+import 'templates_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -291,6 +292,15 @@ class _Header extends ConsumerWidget {
                 ),
               ),
               const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.dashboard_customize_outlined),
+                tooltip: 'Templates',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TemplatesScreen(),
+                  ),
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.file_open_outlined),
                 tooltip: 'Import project bundle',
