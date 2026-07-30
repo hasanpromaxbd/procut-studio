@@ -6,11 +6,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../core/di/providers.dart';
 import '../../../core/error/failure.dart';
@@ -24,6 +26,7 @@ import '../../../domain/entities/track.dart';
 import '../../../engine/timeline/playback_clock.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/editor_state.dart';
+import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
 import '../../viewmodels/timeline_view_controller.dart';
 import '../../widgets/common/glass_panel.dart';
@@ -286,6 +289,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           },
         ),
         IconButton(
+          icon: const Icon(Icons.photo_camera_rounded),
+          tooltip: 'Save this frame as an image',
+          onPressed: () => unawaited(_snapshotFrame()),
+        ),
+        IconButton(
           icon: const Icon(Icons.area_chart_rounded),
           tooltip: strings.scopes,
           onPressed: () => unawaited(
@@ -366,6 +374,37 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     ref
         .read(editorControllerProvider(widget.projectId).notifier)
         .autoReframe(preset);
+  }
+
+  /// The frame exactly as previewed — effects, titles, masks — shared as a
+  /// PNG through the system sheet.
+  Future<void> _snapshotFrame() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final png = await ref
+        .read(eyedropperProvider.notifier)
+        .snapshotPng();
+    if (png == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not capture the preview.')),
+      );
+      return;
+    }
+    final paths = ref.read(pathServiceProvider);
+    final file = File(
+      p.join(
+        paths.tempDir.path,
+        'frame-${DateTime.now().millisecondsSinceEpoch}.png',
+      ),
+    );
+    await file.writeAsBytes(png);
+    final result = await ref
+        .read(exportRepositoryProvider)
+        .share(file.path, subject: 'Frame from ProCut Studio');
+    result.fold(
+      (_) {},
+      (failure) =>
+          messenger.showSnackBar(SnackBar(content: Text(failure.message))),
+    );
   }
 
   Future<void> _renameProject(String current) async {

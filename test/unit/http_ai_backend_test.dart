@@ -268,4 +268,70 @@ void main() {
       expect(capabilities, isEmpty);
     });
   });
+
+  group('speech', () {
+    test('posts the OpenAI TTS shape and writes the audio body to disk', () async {
+      Map<String, dynamic>? received;
+      final server = _FakeServer((request) async {
+        received =
+            jsonDecode(await utf8.decoder.bind(request).join())
+                as Map<String, dynamic>;
+        request.response.headers.contentType = ContentType.binary;
+        request.response.add([82, 73, 70, 70, 1, 2, 3, 4]); // "RIFF"…
+      });
+      final baseUrl = await server.start();
+      addTearDown(server.stop);
+
+      final out = File(
+        '${Directory.systemTemp.createTempSync('tts').path}/v.wav',
+      );
+      final result = await HttpAiBackend(dio: Dio(), baseUrl: baseUrl).speech(
+        text: 'Hello world',
+        voice: 'alloy',
+        outputPath: out.path,
+      );
+
+      expect(result.isOk, isTrue, reason: result.failureOrNull?.message);
+      expect(received!['input'], 'Hello world');
+      expect(received!['voice'], 'alloy');
+      expect(received!['response_format'], 'wav');
+      expect(out.readAsBytesSync().take(4), [82, 73, 70, 70],
+          reason: 'the body must land on disk byte for byte');
+    });
+
+    test('an empty body is an error, not a zero-byte clip', () async {
+      final server = _FakeServer((request) async {
+        request.response.statusCode = 200;
+      });
+      final baseUrl = await server.start();
+      addTearDown(server.stop);
+
+      final result = await HttpAiBackend(dio: Dio(), baseUrl: baseUrl).speech(
+        text: 'x',
+        voice: 'alloy',
+        outputPath:
+            '${Directory.systemTemp.createTempSync('tts').path}/v.wav',
+      );
+      expect(result.isErr, isTrue);
+    });
+
+    test('word timestamps are requested with the transcription', () async {
+      String? body;
+      final server = _FakeServer((request) async {
+        body = await utf8.decoder.bind(request).join();
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode(_verboseJson));
+      });
+      final baseUrl = await server.start();
+      addTearDown(server.stop);
+
+      final audio = File(
+        '${Directory.systemTemp.createTempSync('aud').path}/a.wav',
+      )..writeAsBytesSync(const [0, 1, 2]);
+      await HttpAiBackend(dio: Dio(), baseUrl: baseUrl)
+          .transcribe(audioFile: audio);
+
+      expect(body, contains('timestamp_granularities'));
+    });
+  });
 }

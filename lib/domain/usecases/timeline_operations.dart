@@ -1505,6 +1505,64 @@ abstract final class TimelineOperations {
     return Result.ok(next);
   }
 
+  // ── Audio crossfade ──────────────────────────────────────────────────
+
+  /// Sets an equal-power crossfade at the cut after [clipId].
+  ///
+  /// The two clips must be butted. Implemented as a paired fade-out/fade-in
+  /// of [duration] centred on the joint — the clips do not move and no
+  /// overlap is created, so every other edit keeps working. The equal-power
+  /// curves are what make this a crossfade rather than a dip: their sum
+  /// holds unity through the joint (the export uses `afade curve=qsin`).
+  static Result<Timeline> setAudioCrossfade(
+    Timeline timeline,
+    String clipId,
+    Duration duration,
+  ) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip is! AudioClip) {
+      return const Result.err(
+        InvalidEditFailure('Audio crossfades join two audio clips.'),
+      );
+    }
+    final next = track.nextClipAfter(clip.end - _tick);
+    if (next is! AudioClip || next.start != clip.end) {
+      return const Result.err(
+        InvalidEditFailure('The next audio clip must touch this one.'),
+      );
+    }
+    if (clip.locked || next.locked) {
+      return const Result.err(InvalidEditFailure('A clip here is locked.'));
+    }
+
+    final half = TimeUtils.snapToFrame(
+      Duration(microseconds: duration.inMicroseconds ~/ 2),
+      timeline.fps,
+    );
+    final maxHalf = TimeUtils.min(
+      Duration(microseconds: clip.duration.inMicroseconds ~/ 2),
+      Duration(microseconds: next.duration.inMicroseconds ~/ 2),
+    );
+    final clamped = TimeUtils.min(half, maxHalf);
+    if (clamped <= Duration.zero) {
+      return const Result.err(
+        InvalidEditFailure('Too short for a crossfade here.'),
+      );
+    }
+
+    return Result.ok(
+      timeline.replaceTrack(
+        track
+            .replaceClip(clip.copyWith(fadeOut: clamped))
+            .replaceClip(next.copyWith(fadeIn: clamped)),
+      ),
+    );
+  }
+
   // ── Audio character ──────────────────────────────────────────────────
 
   /// Updates an audio clip's voice properties in one edit.

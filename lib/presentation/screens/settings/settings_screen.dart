@@ -13,9 +13,11 @@ import '../../../core/logging/app_logger.dart';
 import '../../../core/services/crash_report_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/utils/time_utils.dart';
+import '../../../data/datasources/remote/bdrive_client.dart';
 import '../../../data/datasources/remote/http_ai_backend.dart';
 import '../../../domain/repositories/ai_repository.dart';
 import '../../viewmodels/ai_settings_controller.dart';
+import '../../viewmodels/bdrive_controller.dart';
 import '../../viewmodels/preview_prefs.dart';
 import '../../widgets/common/glass_panel.dart';
 
@@ -94,6 +96,9 @@ class SettingsScreen extends ConsumerWidget {
               );
             },
           ),
+
+          const SectionHeader(title: 'Bdrive backup'),
+          const _BdriveForm(),
 
           SectionHeader(title: strings.language),
           SegmentedButton<String>(
@@ -608,6 +613,106 @@ class _CrashScreenState extends ConsumerState<_CrashScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+
+/// Where project bundles get backed up — a self-hosted Bdrive server.
+class _BdriveForm extends ConsumerStatefulWidget {
+  const _BdriveForm();
+
+  @override
+  ConsumerState<_BdriveForm> createState() => _BdriveFormState();
+}
+
+class _BdriveFormState extends ConsumerState<_BdriveForm> {
+  late final TextEditingController _url;
+  late final TextEditingController _email;
+  late final TextEditingController _password;
+  bool _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final settings = ref.read(bdriveSettingsProvider);
+    _url = TextEditingController(text: settings.serverUrl);
+    _email = TextEditingController(text: settings.email);
+    _password = TextEditingController(text: settings.password);
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Back up project bundles to your own Bdrive server. Long-press a '
+          'project on the home screen to send it. The password is stored on '
+          'this device only.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: Spacing.sm),
+        TextField(
+          controller: _url,
+          decoration: const InputDecoration(
+            labelText: 'Server',
+            hintText: 'https://drive.example.com',
+            isDense: true,
+          ),
+          onChanged: (_) => setState(() => _dirty = true),
+        ),
+        const SizedBox(height: Spacing.sm),
+        TextField(
+          controller: _email,
+          decoration: const InputDecoration(
+            labelText: 'Email',
+            isDense: true,
+          ),
+          keyboardType: TextInputType.emailAddress,
+          onChanged: (_) => setState(() => _dirty = true),
+        ),
+        const SizedBox(height: Spacing.sm),
+        TextField(
+          controller: _password,
+          decoration: const InputDecoration(
+            labelText: 'Password',
+            isDense: true,
+          ),
+          obscureText: true,
+          onChanged: (_) => setState(() => _dirty = true),
+        ),
+        const SizedBox(height: Spacing.sm),
+        FilledButton.tonal(
+          onPressed: _dirty
+              ? () {
+                  ref.read(bdriveSettingsProvider.notifier).save(
+                        BdriveSettings(
+                          serverUrl: _url.text,
+                          email: _email.text,
+                          password: _password.text,
+                        ),
+                      );
+                  setState(() => _dirty = false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Bdrive settings saved')),
+                  );
+                }
+              : null,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

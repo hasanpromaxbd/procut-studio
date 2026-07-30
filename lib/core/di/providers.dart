@@ -25,6 +25,7 @@ import '../../domain/repositories/media_repository.dart';
 import '../../domain/repositories/project_repository.dart';
 import '../../engine/ai/ai_service.dart';
 import '../../engine/audio/waveform_service.dart';
+import '../../engine/effects/lut_library.dart';
 import '../../engine/export/export_engine.dart';
 import '../../engine/ffmpeg/ffmpeg_service.dart';
 import '../../engine/ffmpeg/ffprobe_service.dart';
@@ -41,6 +42,10 @@ import '../services/permission_service.dart';
 /// Filesystem locations. Overridden with an initialised instance at startup.
 final pathServiceProvider = Provider<PathService>(
   (ref) => throw StateError('pathServiceProvider must be overridden in main()'),
+);
+
+final lutLibraryProvider = Provider<LutLibrary>(
+  (ref) => LutLibrary(directory: ref.watch(pathServiceProvider).lutsDir),
 );
 
 final crashReportServiceProvider = Provider<CrashReportService>(
@@ -148,6 +153,7 @@ final aiBackendProvider = Provider<AiBackend?>((ref) {
     baseUrl: settings.baseUrl,
     apiKey: settings.apiKey.isEmpty ? null : settings.apiKey,
     transcriptionModel: settings.transcriptionModel,
+    speechModel: settings.speechModel,
   );
 });
 

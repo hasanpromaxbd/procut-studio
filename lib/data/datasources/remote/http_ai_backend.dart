@@ -32,11 +32,13 @@ class AiSettings {
     this.baseUrl = '',
     this.apiKey = '',
     this.transcriptionModel = 'whisper-1',
+    this.speechModel = 'tts-1',
   });
 
   final String baseUrl;
   final String apiKey;
   final String transcriptionModel;
+  final String speechModel;
 
   bool get isConfigured => baseUrl.trim().isNotEmpty;
 
@@ -44,10 +46,12 @@ class AiSettings {
     String? baseUrl,
     String? apiKey,
     String? transcriptionModel,
+    String? speechModel,
   }) => AiSettings(
     baseUrl: baseUrl ?? this.baseUrl,
     apiKey: apiKey ?? this.apiKey,
     transcriptionModel: transcriptionModel ?? this.transcriptionModel,
+    speechModel: speechModel ?? this.speechModel,
   );
 
   /// Trailing slashes turn every request path into a double slash, which some
@@ -61,12 +65,14 @@ class AiSettings {
     'baseUrl': baseUrl,
     'apiKey': apiKey,
     'model': transcriptionModel,
+    'speechModel': speechModel,
   };
 
   factory AiSettings.fromJson(Map<String, dynamic> json) => AiSettings(
     baseUrl: json['baseUrl'] as String? ?? '',
     apiKey: json['apiKey'] as String? ?? '',
     transcriptionModel: json['model'] as String? ?? 'whisper-1',
+    speechModel: json['speechModel'] as String? ?? 'tts-1',
   );
 
   @override
@@ -87,6 +93,7 @@ class HttpAiBackend implements AiBackend {
     required this.baseUrl,
     this.apiKey,
     this.transcriptionModel = 'whisper-1',
+    this.speechModel = 'tts-1',
   }) : _dio = dio;
 
   static const _log = Log('HttpAiBackend');
@@ -100,6 +107,7 @@ class HttpAiBackend implements AiBackend {
   final String? apiKey;
 
   final String transcriptionModel;
+  final String speechModel;
 
   Options get _options => Options(
     headers: {if (apiKey != null && apiKey!.isNotEmpty) 'Authorization': 'Bearer $apiKey'},
@@ -144,6 +152,7 @@ class HttpAiBackend implements AiBackend {
       '/matte': AiCapability.backgroundRemoval,
       '/track': AiCapability.objectTracking,
       '/track/faces': AiCapability.faceTracking,
+      '/audio/speech': AiCapability.textToSpeech,
     }.entries) {
       if (await _endpointExists(entry.key)) available.add(entry.value);
     }
@@ -184,6 +193,10 @@ class HttpAiBackend implements AiBackend {
         // Plain `json` returns only the full text; `verbose_json` is what
         // carries per-segment timings, which is the entire point here.
         'response_format': 'verbose_json',
+        // Word-level timestamps power karaoke captions. Servers that do not
+        // support the flag ignore it and return segments only, which still
+        // works — the captions just cannot highlight per word.
+        'timestamp_granularities[]': 'word',
         'language': ?languageHint,
       });
 
@@ -221,6 +234,53 @@ class HttpAiBackend implements AiBackend {
       _log.e('transcribe threw', error: e, stackTrace: s);
       return Result.err(
         UnknownFailure('Transcription failed.', cause: e, stackTrace: s),
+      );
+    }
+  }
+
+  /// `POST /audio/speech` — the OpenAI TTS shape, which speaches and
+  /// openedai-speech both serve. The response body is the audio itself.
+  @override
+  Future<Result<String>> speech({
+    required String text,
+    required String voice,
+    required String outputPath,
+    void Function(double progress)? onProgress,
+  }) async {
+    try {
+      final response = await _dio.post<List<int>>(
+        '$baseUrl/audio/speech',
+        data: {
+          'model': speechModel,
+          'input': text,
+          'voice': voice,
+          // WAV imports without a decode step and the file never leaves the
+          // device, so compression buys nothing here.
+          'response_format': 'wav',
+        },
+        options: _options.copyWith(responseType: ResponseType.bytes),
+        onReceiveProgress: (got, total) {
+          if (total > 0) onProgress?.call(got / total);
+        },
+      );
+
+      final bytes = response.data;
+      if (bytes == null || bytes.isEmpty) {
+        return const Result.err(
+          NetworkFailure('The speech server returned no audio.'),
+        );
+      }
+      await File(outputPath).writeAsBytes(bytes);
+      _log.i('speech synthesised', fields: {
+        'chars': text.length,
+        'bytes': bytes.length,
+      });
+      return Result.ok(outputPath);
+    } on DioException catch (e) {
+      return Result.err(_networkFailure(e, 'Voiceover failed.'));
+    } catch (e, s) {
+      return Result.err(
+        UnknownFailure('Voiceover failed.', cause: e, stackTrace: s),
       );
     }
   }

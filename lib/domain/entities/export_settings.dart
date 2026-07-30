@@ -71,7 +71,11 @@ enum VideoCodec {
 
 enum ExportContainer {
   mp4('MP4', 'mp4'),
-  mov('MOV', 'mov');
+  mov('MOV', 'mov'),
+
+  /// Animated GIF: no audio, palette-quantised, huge per second — for short
+  /// loops and stickers, and the settings sheet says so.
+  gif('GIF', 'gif');
 
   const ExportContainer(this.label, this.extension);
   final String label;
@@ -205,6 +209,14 @@ class ExportSettings {
     if (audioCodec == AudioCodec.alac && container == ExportContainer.mp4) {
       // ALAC in MP4 is legal but poorly supported by Android players.
       issues.add('ALAC audio is only reliable in a MOV container.');
+    }
+    if (container == ExportContainer.gif) {
+      if (fps > 15) {
+        issues.add('GIF above 15 fps balloons in size — lower the rate.');
+      }
+      if (resolution.longEdge > 1280) {
+        issues.add('GIF at this resolution will be enormous — use 720p or less.');
+      }
     }
     return issues;
   }

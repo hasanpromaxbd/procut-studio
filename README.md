@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  243 tests, all passing
+flutter test                 →  273 tests, all passing
 flutter build apk --release  →  built (117 MB, R8 + shrinker)
 tool/verify_shaders.sh       →  PASS (real impellerc)
 tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
@@ -46,6 +46,10 @@ what is architected with a working seam but needs an external piece. See
 | Colour scopes, composition guides, video-clip waveforms | Implemented |
 | Keyboard shortcuts, undo history scrubber, export queue | Implemented |
 | Bengali localisation, local-only crash reporting | Implemented + tested |
+| Proxy editing, jump-cut assistant, compound clips | Implemented + tested |
+| Loudness normalisation, voice presets, audio crossfade | Implemented — verified against real ffmpeg |
+| LUT import, karaoke captions, snapshot, GIF export | Implemented |
+| TTS voiceover, Bdrive backup (resumable, real protocol) | Implemented + tested |
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |

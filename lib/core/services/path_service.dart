@@ -93,6 +93,10 @@ class PathService {
   Directory get crashesDir =>
       Directory(p.join(_docs.path, 'crashes'));
 
+  /// Extracted and imported .cube LUTs. Documents, because a user's imported
+  /// look must not vanish with a cache sweep.
+  Directory get lutsDir => Directory(p.join(_docs.path, 'luts'));
+
   File diagnosticsFile() => File(
     p.join(tempDir.path,
         'procut-diagnostics-${DateTime.now().millisecondsSinceEpoch}.txt'),

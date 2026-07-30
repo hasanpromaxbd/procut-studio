@@ -120,6 +120,26 @@ class SpeedSheet extends ConsumerWidget {
                 ),
               ],
             ),
+            const SectionHeader(title: 'Crossfade into the next clip'),
+            Wrap(
+              spacing: Spacing.xs,
+              children: [
+                for (final ms in [300, 500, 1000, 2000])
+                  ActionChip(
+                    label: Text('${ms / 1000}s'),
+                    onPressed: () => controller.setAudioCrossfade(
+                      Duration(milliseconds: ms),
+                    ),
+                  ),
+              ],
+            ),
+            Text(
+              'Equal-power fades either side of the cut — the next audio '
+              'clip must be touching this one.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SectionHeader(title: 'Voice'),
             Wrap(
               spacing: Spacing.xs,

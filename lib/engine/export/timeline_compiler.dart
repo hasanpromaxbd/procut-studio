@@ -176,7 +176,11 @@ class TimelineCompiler {
         .then(Filters.setSar('1'));
 
     // ── 4. Audio ─────────────────────────────────────────────────────
-    final audioOut = _compileAudio(
+    // GIF has no audio stream; compiling one would leave its labels dangling
+    // and FFmpeg refuses a graph with an unconnected output.
+    final audioOut = settings.container == ExportContainer.gif
+        ? null
+        : _compileAudio(
       graph: graph,
       project: project,
       settings: settings,
@@ -186,6 +190,47 @@ class TimelineCompiler {
     );
 
     // ── 5. Output flags ──────────────────────────────────────────────
+    if (settings.container == ExportContainer.gif) {
+      // GIF is its own world: 256 colours via a two-stage palette *inside*
+      // one graph (split → palettegen → paletteuse), no audio, gif muxer.
+      final paletted = graph.newLabel('gif');
+      final split1 = graph.newLabel('gs');
+      final split2 = graph.newLabel('gp');
+      final palette = graph.newLabel('pal');
+      graph.chain(inputs: [videoOut], outputs: [split1, split2])
+          .then(Filter('split')..arg('2'));
+      graph.chain(inputs: [split1], outputs: [palette])
+          .then(Filter('palettegen', {'stats_mode': 'diff'}));
+      graph.chain(inputs: [split2, palette], outputs: [paletted]).then(
+        Filter('paletteuse', {'dither': 'bayer', 'bayer_scale': 4}),
+      );
+
+      final gifArgs = <String>['-r', '$fps', '-f', 'gif', '-an'];
+      final missingGif = graph.validate();
+      if (missingGif.isNotEmpty) {
+        _log.e('graph references undefined labels', fields: {'labels': missingGif});
+        warnings.add('Internal graph error: unresolved ${missingGif.join(', ')}.');
+      }
+      final plan = RenderPlan(
+        inputs: inputs,
+        filterGraph: graph.build(),
+        outputArgs: gifArgs,
+        outputPath: outputPath,
+        duration: duration,
+        width: outWidth,
+        height: outHeight,
+        fps: fps,
+        rasterSteps: rasterSteps,
+        preRenderSteps: preRenderSteps,
+        commandScripts: commandScripts,
+        videoOutLabel: paletted,
+        audioOutLabel: null,
+        warnings: warnings,
+      );
+      _log.i('compiled', fields: {'plan': plan.toString()});
+      return plan;
+    }
+
     final outputArgs = <String>[
       '-c:v', encoder.encoderName,
       ...encoderProbe.rateControlArgs(
@@ -580,8 +625,10 @@ class TimelineCompiler {
         // composed, rather than an approximation via `drawtext`.
         final animated = clip is TextClip
             ? (clip.animationIn != TextAnimation.none ||
-                clip.animationOut != TextAnimation.none ||
-                clip.transform.isAnimated)
+                  clip.animationOut != TextAnimation.none ||
+                  clip.transform.isAnimated ||
+                  // The word highlight changes every frame by definition.
+                  clip.isKaraoke)
             : clip.transform.isAnimated;
 
         final frameCount = animated
@@ -1162,14 +1209,24 @@ class TimelineCompiler {
         if ((source.gain - 1.0).abs() > 1e-6) {
           chain.then(Filters.volume(source.gain));
         }
+        // Equal-power for every audio fade: at a crossfade joint the curves
+        // must sum to unity, and on a lone fade the qsin curve simply sounds
+        // less abrupt than linear. One curve, both cases right.
         if (source.fadeIn > Duration.zero) {
-          chain.then(Filters.audioFadeIn(Duration.zero, source.fadeIn));
+          chain.then(
+            Filters.audioFadeIn(
+              Duration.zero,
+              source.fadeIn,
+              equalPower: true,
+            ),
+          );
         }
         if (source.fadeOut > Duration.zero) {
           chain.then(
             Filters.audioFadeOut(
               source.duration - source.fadeOut,
               source.fadeOut,
+              equalPower: true,
             ),
           );
         }

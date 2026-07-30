@@ -34,6 +34,7 @@ class AiToolsSheet extends ConsumerStatefulWidget {
 
 class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
   AiCapability? _running;
+  bool _karaoke = false;
   double _progress = 0;
   String? _status;
   String? _error;
@@ -180,6 +181,17 @@ class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
                       ),
                     ),
                   const SizedBox(height: Spacing.sm),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: _karaoke,
+                    title: const Text('Karaoke style'),
+                    subtitle: const Text(
+                      'Each word lights up as it is spoken — needs a server '
+                      'that returns word timestamps',
+                    ),
+                    onChanged: (value) => setState(() => _karaoke = value),
+                  ),
                   _ToolTile(
                     icon: Icons.closed_caption_rounded,
                     title: 'Auto captions',
@@ -209,6 +221,15 @@ class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
                         ),
                       );
                     },
+                  ),
+                  _ToolTile(
+                    icon: Icons.record_voice_over_rounded,
+                    title: 'AI voiceover',
+                    subtitle:
+                        'Type a script; the server speaks it onto the timeline',
+                    enabled: available.contains(AiCapability.textToSpeech) &&
+                        _running == null,
+                    onTap: () => unawaited(_promptVoiceover()),
                   ),
                   _ToolTile(
                     icon: Icons.person_remove_rounded,
@@ -358,7 +379,16 @@ class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
       (track) {
         // Offset by the clip's timeline position: the recogniser works in
         // source time and knows nothing about where the clip sits.
-        _editor.addSubtitles(track, offset: clip.start);
+        final hasWords = track.cues.any((c) => c.words.isNotEmpty);
+        _editor.addSubtitles(
+          track,
+          offset: clip.start,
+          karaoke: _karaoke && hasWords,
+        );
+        if (_karaoke && !hasWords) {
+          return '${track.cues.length} captions added — the server sent no '
+              'word timestamps, so they are plain, not karaoke';
+        }
         return '${track.cues.length} captions added over '
             '${TimeUtils.formatShort(track.duration)}';
       },
@@ -367,6 +397,47 @@ class _AiToolsSheetState extends ConsumerState<AiToolsSheet> {
         return null;
       },
     );
+  }
+
+  Future<void> _promptVoiceover() async {
+    final controller = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Voiceover script'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'What should the voice say?',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Speak it'),
+          ),
+        ],
+      ),
+    );
+    if (text == null || text.trim().isEmpty || !mounted) return;
+
+    await _run(AiCapability.textToSpeech, () async {
+      final error = await _editor.addTtsVoiceover(
+        text.trim(),
+        onProgress: _onProgress,
+      );
+      if (error != null) {
+        setState(() => _error = error);
+        return null;
+      }
+      return 'Voiceover placed at the playhead';
+    });
   }
 
   Future<String?> _removeBackground(MediaAsset asset) async {

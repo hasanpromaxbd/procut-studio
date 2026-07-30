@@ -347,16 +347,29 @@ abstract final class Filters {
   static Filter volume(double gain) =>
       Filter('volume')..arg(FilterGraph.formatDouble(gain));
 
-  static Filter audioFadeIn(Duration start, Duration duration) => Filter('afade', {
+  /// [equalPower] selects the quarter-sine curve: at a butt joint the sum of
+  /// an equal-power out and in stays at unity, so a crossfade has no dip in
+  /// the middle. The default linear ("tri") curve dips ~3 dB there.
+  static Filter audioFadeIn(
+    Duration start,
+    Duration duration, {
+    bool equalPower = false,
+  }) => Filter('afade', {
     't': 'in',
     'st': FilterGraph.formatDouble(start.inMicroseconds / 1e6),
     'd': FilterGraph.formatDouble(duration.inMicroseconds / 1e6),
+    if (equalPower) 'curve': 'qsin',
   });
 
-  static Filter audioFadeOut(Duration start, Duration duration) => Filter('afade', {
+  static Filter audioFadeOut(
+    Duration start,
+    Duration duration, {
+    bool equalPower = false,
+  }) => Filter('afade', {
     't': 'out',
     'st': FilterGraph.formatDouble(start.inMicroseconds / 1e6),
     'd': FilterGraph.formatDouble(duration.inMicroseconds / 1e6),
+    if (equalPower) 'curve': 'qsin',
   });
 
   static Filter videoFade({

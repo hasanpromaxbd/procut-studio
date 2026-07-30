@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 243 tests passing, debug and release
+Verified state: `flutter analyze` clean, 273 tests passing, debug and release
 APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh` and
 `tool/verify_ducking.sh` all pass against real impellerc/ffmpeg binaries.
 
@@ -273,6 +273,29 @@ its endpoints, and the export plan warns when that happens.
 Localisation covers the main surfaces (home, tool rail, editor chrome,
 export, settings). Sheet-internal prose is still English; the string table
 in `lib/core/l10n/app_strings.dart` is the single place to extend.
+
+## Third wave (July 2026)
+
+| Feature | Status |
+|---|---|
+| Proxy editing (auto-build on import, preview-quality setting, originals at export) | Implemented |
+| Jump-cut assistant (relative-threshold silence detection, preview chips, one-step apply) | Implemented + tested |
+| Compound clips (single-track v1: group/ungroup, lossless, export flattens through real track machinery) | Implemented + tested |
+| Saved versions in the history sheet (auto-backup rotation, two-way restore) | Implemented |
+| −14 LUFS loudness normalisation (single-pass `loudnorm`, said plainly) | Implemented — verified against real ffmpeg |
+| Voice presets: deep/helium/robot/telephone/echo/cave | Implemented — all chains verified against real ffmpeg |
+| Audio crossfade (equal-power `qsin` fades at the joint) | Implemented |
+| LUT import (`.cube` validation, bundled LUTs extracted to disk, picker in Effects) | Implemented |
+| Karaoke captions (word timestamps requested; per-word highlight; per-frame raster on export) | Implemented — needs a server that returns word timings |
+| Frame snapshot (preview raster → PNG → share) | Implemented |
+| GIF export (in-graph palettegen/paletteuse, no-audio, size guardrails) | Implemented — verified against real ffmpeg |
+| TTS voiceover (`/audio/speech`, lands at the playhead) | Implemented + tested against a mock server |
+| Bdrive backup (real NimbusDrive protocol: login/folders/resumable chunked upload) | Implemented + tested, including the resume path |
+
+Compound-clip limits, stated plainly: single-track membership, no nesting,
+splitting requires ungrouping first, and a compound's animated transform is
+preview-only (static scale/flips do export). The jump-cut assistant requires
+un-reversed, un-ramped clips and says so.
 
 ## Known gaps
 

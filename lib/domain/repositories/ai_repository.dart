@@ -30,7 +30,8 @@ enum AiCapability {
   colorEnhancement('AI Color Enhancement', requiresModel: false),
   upscaling('AI Upscaling', requiresModel: false),
   voiceIsolation('AI Voice Isolation', requiresModel: false),
-  sceneDetection('AI Scene Detection', requiresModel: false);
+  sceneDetection('AI Scene Detection', requiresModel: false),
+  textToSpeech('AI Voiceover', requiresModel: true);
 
   const AiCapability(this.label, {required this.requiresModel});
   final String label;
@@ -145,6 +146,13 @@ abstract interface class AiRepository {
   });
 
   /// Finds hard cuts. Genuinely local — FFmpeg's scene-score filter.
+  /// Synthesises [text] to speech, returning the audio file's path.
+  Future<Result<String>> synthesizeSpeech(
+    String text, {
+    String voice = 'alloy',
+    void Function(double progress)? onProgress,
+  });
+
   Future<Result<List<SceneCut>>> detectScenes(
     MediaAsset asset, {
     double threshold = 0.35,

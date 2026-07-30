@@ -4,6 +4,30 @@ library;
 import 'package:flutter/foundation.dart';
 
 @immutable
+/// One word with its own clock — what karaoke highlighting is made of.
+class WordTiming {
+  const WordTiming({required this.start, required this.end, required this.text});
+
+  final Duration start;
+  final Duration end;
+  final String text;
+
+  WordTiming shifted(Duration by) =>
+      WordTiming(start: start + by, end: end + by, text: text);
+
+  Map<String, dynamic> toJson() => {
+    'sUs': start.inMicroseconds,
+    'eUs': end.inMicroseconds,
+    't': text,
+  };
+
+  static WordTiming fromJson(Map<String, dynamic> json) => WordTiming(
+    start: Duration(microseconds: (json['sUs'] as num?)?.toInt() ?? 0),
+    end: Duration(microseconds: (json['eUs'] as num?)?.toInt() ?? 0),
+    text: json['t'] as String? ?? '',
+  );
+}
+
 class SubtitleCue {
   const SubtitleCue({
     required this.start,
@@ -11,11 +35,15 @@ class SubtitleCue {
     required this.text,
     this.confidence = 1.0,
     this.speaker,
+    this.words = const [],
   });
 
   final Duration start;
   final Duration end;
   final String text;
+
+  /// Per-word timings when the recogniser provided them; empty otherwise.
+  final List<WordTiming> words;
 
   /// 0..1 from the recogniser. The review UI highlights low-confidence cues so
   /// the user checks those first instead of re-reading everything.
@@ -32,12 +60,14 @@ class SubtitleCue {
     String? text,
     double? confidence,
     String? speaker,
+    List<WordTiming>? words,
   }) => SubtitleCue(
     start: start ?? this.start,
     end: end ?? this.end,
     text: text ?? this.text,
     confidence: confidence ?? this.confidence,
     speaker: speaker ?? this.speaker,
+    words: words ?? this.words,
   );
 
   Map<String, dynamic> toJson() => {

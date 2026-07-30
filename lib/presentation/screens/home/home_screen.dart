@@ -14,6 +14,7 @@ import '../../../core/theme/app_dimens.dart';
 import '../../../core/utils/time_utils.dart';
 import '../../../domain/entities/project.dart';
 import '../../../domain/entities/timeline.dart';
+import '../../viewmodels/bdrive_controller.dart';
 import '../../viewmodels/home_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 import '../editor/editor_screen.dart';
@@ -172,6 +173,12 @@ class HomeScreen extends ConsumerWidget {
               onTap: () => Navigator.pop(context, 'bundle'),
             ),
             ListTile(
+              leading: const Icon(Icons.cloud_upload_outlined),
+              title: const Text('Back up to Bdrive'),
+              subtitle: const Text('Bundle and upload to your own server'),
+              onTap: () => Navigator.pop(context, 'bdrive'),
+            ),
+            ListTile(
               leading: Icon(
                 Icons.delete_outline_rounded,
                 color: Theme.of(context).colorScheme.error,
@@ -206,6 +213,21 @@ class HomeScreen extends ConsumerWidget {
             SnackBar(content: Text(failure.message)),
           ),
         );
+
+      case 'bdrive':
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Backing up to Bdrive…')),
+        );
+        final error = await ref.read(bdriveBackupProvider)(summary.id);
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                error ?? '"${summary.name}" backed up to Bdrive',
+              ),
+            ),
+          );
 
       case 'delete':
         if (!context.mounted) return;

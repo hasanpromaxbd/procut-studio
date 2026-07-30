@@ -82,7 +82,12 @@ abstract final class LayerPainter {
     final opacity = (baseOpacity * animation.opacity).clamp(0.0, 1.0);
     if (opacity <= 0.001) return;
 
-    final text = _visibleText(clip, animation.reveal);
+    // Karaoke renders from the word list so highlight boundaries line up
+    // exactly with what is measured; the reveal animation is skipped — the
+    // words themselves are the animation.
+    final text = clip.isKaraoke
+        ? clip.wordTimings.map((w) => w.text).join(' ')
+        : _visibleText(clip, animation.reveal);
     if (text.isEmpty) return;
 
     final fontSize = style.fontSizePx(size.height);
@@ -163,8 +168,68 @@ abstract final class LayerPainter {
       stroke.paint(canvas, origin);
     }
 
-    painter.paint(canvas, origin);
+    if (clip.isKaraoke) {
+      // Same layout, different ink: spans differ only in colour, so the
+      // metrics match the measuring painter exactly.
+      _buildKaraokeFill(
+        clip: clip,
+        style: style,
+        fontSize: fontSize,
+        opacity: opacity,
+        maxWidth: maxWidth,
+        localTime: localTime,
+      ).paint(canvas, origin);
+    } else {
+      painter.paint(canvas, origin);
+    }
     canvas.restore();
+  }
+
+  /// The karaoke fill: words already spoken in full colour, the rest dimmed.
+  ///
+  /// Colour only — per-word scale or offset would need one painter per word
+  /// and break line wrapping. The 45% dim is enough contrast to read the
+  /// bounce without the text falling apart visually.
+  static TextPainter _buildKaraokeFill({
+    required TextClip clip,
+    required TextStyleSpec style,
+    required double fontSize,
+    required double opacity,
+    required double maxWidth,
+    required Duration localTime,
+  }) {
+    // Metrics from the same resolver as the measuring painter — this is what
+    // guarantees the karaoke fill lands exactly on the stroke and glow.
+    final base = _resolveFont(
+      style,
+      fontSize,
+    ).copyWith(letterSpacing: style.letterSpacing * fontSize);
+    final ink = Color(style.color);
+
+    final spans = <TextSpan>[];
+    for (final (index, word) in clip.wordTimings.indexed) {
+      final spoken = localTime >= word.start;
+      spans.add(
+        TextSpan(
+          text: index == clip.wordTimings.length - 1
+              ? word.text
+              : '${word.text} ',
+          style: base.copyWith(
+            color: ink.withValues(alpha: (spoken ? 1.0 : 0.45) * opacity),
+          ),
+        ),
+      );
+    }
+
+    return TextPainter(
+      text: TextSpan(children: spans),
+      textAlign: switch (style.alignment) {
+        TextAlignment.left => TextAlign.left,
+        TextAlignment.center => TextAlign.center,
+        TextAlignment.right => TextAlign.right,
+      },
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
   }
 
   static TextPainter _buildTextPainter({

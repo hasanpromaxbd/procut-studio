@@ -1,12 +1,17 @@
 /// Effect browser and parameter inspector.
 library;
 
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/di/providers.dart';
 import '../../../../core/theme/app_dimens.dart';
 import '../../../../domain/entities/effect.dart';
 import '../../../../engine/effects/effect_catalog.dart';
+import '../../../../engine/effects/lut_library.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../viewmodels/eyedropper_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
@@ -201,6 +206,10 @@ class _AppliedEffectTile extends StatelessWidget {
                 ),
                 const SizedBox(height: Spacing.sm),
               ],
+              if (effect.type == EffectType.cinematicLut) ...[
+                _LutPicker(effect: effect, onChanged: onChanged),
+                const SizedBox(height: Spacing.sm),
+              ],
               for (final param in spec.params)
                 LabeledSlider(
                   label: param.label,
@@ -227,6 +236,100 @@ class _AppliedEffectTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// Choose a look, or bring your own `.cube`.
+class _LutPicker extends ConsumerStatefulWidget {
+  const _LutPicker({required this.effect, required this.onChanged});
+
+  final Effect effect;
+  final ValueChanged<Effect> onChanged;
+
+  @override
+  ConsumerState<_LutPicker> createState() => _LutPickerState();
+}
+
+class _LutPickerState extends ConsumerState<_LutPicker> {
+  List<LutEntry>? _luts;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      ref.read(lutLibraryProvider).list().then((luts) {
+        if (mounted) setState(() => _luts = luts);
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final luts = _luts;
+    final selected = widget.effect.stringParams['lut'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (luts == null)
+          const LinearProgressIndicator()
+        else
+          Wrap(
+            spacing: Spacing.xs,
+            runSpacing: Spacing.xs,
+            children: [
+              for (final lut in luts)
+                ChoiceChip(
+                  selected: selected == lut.path,
+                  label: Text(lut.name),
+                  avatar: lut.bundled
+                      ? null
+                      : const Icon(Icons.folder_rounded, size: 14),
+                  onSelected: (_) => widget.onChanged(
+                    widget.effect.withStringParam('lut', lut.path),
+                  ),
+                ),
+              ActionChip(
+                avatar: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('Import .cube'),
+                onPressed: () => unawaited(_import()),
+              ),
+            ],
+          ),
+        if (selected == null)
+          Padding(
+            padding: const EdgeInsets.only(top: Spacing.xs),
+            child: Text(
+              'Pick a look — without one this effect does nothing.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _import() async {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
+    );
+    final path = picked?.files.firstOrNull?.path;
+    if (path == null || !mounted) return;
+
+    final result = await ref.read(lutLibraryProvider).import(path);
+    if (!mounted) return;
+    result.fold(
+      (entry) {
+        widget.onChanged(widget.effect.withStringParam('lut', entry.path));
+        setState(() => _luts = [...?_luts, entry]);
+      },
+      (failure) => ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message))),
     );
   }
 }

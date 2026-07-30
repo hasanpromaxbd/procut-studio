@@ -125,4 +125,29 @@ class EyedropperController extends Notifier<EyedropperState> {
   /// FFmpeg's `chromakey` wants `0xRRGGBB`; alpha is meaningless for a key.
   static String toFfmpegColour(int argb) =>
       '0x${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  /// Rasterises the preview as a PNG — the frame exactly as composed, effects
+  /// and all. [pixelRatio] upsamples the widget raster; the ceiling keeps a
+  /// tablet from allocating a 100-megapixel bitmap for a screenshot.
+  Future<Uint8List?> snapshotPng({double pixelRatio = 3}) async {
+    final context = previewKey.currentContext;
+    final boundary = context?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || boundary.size.isEmpty) {
+      return null;
+    }
+    try {
+      final image = await boundary.toImage(
+        pixelRatio: pixelRatio.clamp(1, 4),
+      );
+      try {
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        return data?.buffer.asUint8List();
+      } finally {
+        image.dispose();
+      }
+    } catch (e) {
+      _log.w('snapshot failed', error: e);
+      return null;
+    }
+  }
 }

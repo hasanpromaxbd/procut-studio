@@ -847,6 +847,13 @@ class EditorController extends Notifier<EditorState?> {
     _apply(operation(current.timeline), label);
   }
 
+  /// Crossfades the selected audio clip into the next one.
+  void setAudioCrossfade(Duration duration) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.setAudioCrossfade(timeline, clipId, duration),
+    'crossfade',
+  );
+
   // ── Audio character ──────────────────────────────────────────────────
 
   void setPitch(double semitones) => _applyToSelection(
@@ -875,6 +882,64 @@ class EditorController extends Notifier<EditorState?> {
     ),
     effect.isActive ? effect.label.toLowerCase() : 'clear voice effect',
   );
+
+  // ── Voiceover ────────────────────────────────────────────────────────
+
+  /// Speaks [text] through the AI server and drops the result on an audio
+  /// track at the playhead. Returns an error message, or null on success.
+  Future<String?> addTtsVoiceover(
+    String text, {
+    String voice = 'alloy',
+    void Function(double progress)? onProgress,
+  }) async {
+    final current = state;
+    if (current == null) return 'No project open.';
+
+    final synth = await ref
+        .read(aiRepositoryProvider)
+        .synthesizeSpeech(text, voice: voice, onProgress: onProgress);
+    final path = synth.valueOrNull;
+    if (path == null) return synth.failureOrNull?.message ?? 'Voiceover failed.';
+
+    final imported = await _media.importFile(path);
+    final asset = imported.valueOrNull;
+    if (asset == null) {
+      return imported.failureOrNull?.message ?? 'Could not import the audio.';
+    }
+
+    final refreshed = state;
+    if (refreshed == null) return 'The project closed mid-flight.';
+
+    var timeline = refreshed.timeline;
+    var track = _firstTrackOfType(timeline, TrackType.audio);
+    if (track == null) {
+      timeline = TimelineOperations.addTrack(timeline, TrackType.audio)
+          .getOrElse(timeline);
+      track = timeline.tracks.last;
+    }
+
+    final at = ref.read(playheadControllerProvider).position;
+    final result = TimelineOperations.insertClip(
+      timeline,
+      track.id,
+      AudioClip(
+        id: IdGenerator.clip(),
+        trackId: track.id,
+        start: at,
+        duration: asset.duration,
+        assetId: asset.id,
+        label: 'Voiceover',
+        isVoiceOver: true,
+      ),
+      at: at,
+    );
+
+    state = refreshed.copyWith(
+      project: refreshed.project.withAsset(asset),
+    );
+    _apply(result, 'voiceover');
+    return null;
+  }
 
   // ── Versions ─────────────────────────────────────────────────────────
 
@@ -1276,6 +1341,7 @@ class EditorController extends Notifier<EditorState?> {
     SubtitleTrack track, {
     TextStyleSpec? style,
     Duration offset = Duration.zero,
+    bool karaoke = false,
   }) {
     final current = state;
     if (current == null || track.isEmpty) return;
@@ -1308,6 +1374,10 @@ class EditorController extends Notifier<EditorState?> {
           text: cue.text,
           style: captionStyle,
           isSubtitle: true,
+          // Word clocks arrive in source time; the clip wants them local.
+          wordTimings: karaoke
+              ? [for (final w in cue.words) w.shifted(-cue.start)]
+              : const [],
           // Machine transcription is rarely perfect; a low-confidence cue is
           // labelled so the review pass knows where to look.
           label: cue.isUncertain ? 'check' : null,

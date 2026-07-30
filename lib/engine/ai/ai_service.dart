@@ -163,6 +163,37 @@ class AiService implements AiRepository {
   // ───────────────────────────────────────────────────────────────────
 
   @override
+  @override
+  Future<Result<String>> synthesizeSpeech(
+    String text, {
+    String voice = 'alloy',
+    void Function(double progress)? onProgress,
+  }) async {
+    final backend = _backend;
+    if (backend == null) {
+      return const Result.err(
+        FeatureUnavailableFailure(
+          'Voiceover needs an AI server — set one up in Settings.',
+        ),
+      );
+    }
+    if (text.trim().isEmpty) {
+      return const Result.err(CancelledFailure('Nothing to say.'));
+    }
+    final out = p.join(
+      _paths.recordingsDir.path,
+      'tts_${DateTime.now().millisecondsSinceEpoch}.wav',
+    );
+    await _paths.recordingsDir.create(recursive: true);
+    return backend.speech(
+      text: text,
+      voice: voice,
+      outputPath: out,
+      onProgress: onProgress,
+    );
+  }
+
+  @override
   Future<Result<List<SceneCut>>> detectScenes(
     MediaAsset asset, {
     double threshold = 0.35,
@@ -415,6 +446,13 @@ abstract interface class AiBackend {
     required Duration to,
     void Function(double progress)? onProgress,
   });
+
+  Future<Result<String>> speech({
+    required String text,
+    required String voice,
+    required String outputPath,
+    void Function(double progress)? onProgress,
+  });
 }
 
 /// Parses the wire format the backends share, so an implementation only has to
@@ -431,6 +469,14 @@ abstract final class AiWireFormat {
           end: _seconds(map['end']),
           text: (map['text'] as String? ?? '').trim(),
           confidence: (map['confidence'] as num?)?.toDouble() ?? 1.0,
+          words: [
+            for (final w in (map['words'] as List?) ?? const [])
+              WordTiming(
+                start: _seconds((w as Map)['start']),
+                end: _seconds(w['end']),
+                text: ((w['word'] ?? w['text']) as String? ?? '').trim(),
+              ),
+          ],
         );
       }).where((c) => c.text.isNotEmpty).toList(),
     );
