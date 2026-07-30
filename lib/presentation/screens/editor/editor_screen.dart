@@ -36,6 +36,7 @@ import 'editor_shortcuts.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/history_sheet.dart';
+import 'sheets/jump_cut_sheet.dart';
 import 'sheets/mask_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
@@ -503,6 +504,17 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: RhythmSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.group:
+        controller.toggleGroup();
+        await HapticFeedback.selectionClick();
+
+      case _ToolAction.jumpCut:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: JumpCutSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.mixer:
         if (!mounted) return;
         await ToolSheet.show<void>(
@@ -748,6 +760,8 @@ enum _ToolAction {
   trim,
   motion,
   rhythm,
+  jumpCut,
+  group,
   mixer,
   addTrack,
 }
@@ -881,6 +895,18 @@ class _ToolRail extends ConsumerWidget {
         icon: Icons.tune_rounded,
         label: strings.toolMixer,
         onPressed: () => onAction(_ToolAction.mixer),
+      ),
+      ToolIconButton(
+        icon: Icons.cut_rounded,
+        label: strings.toolJumpCut,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.jumpCut),
+      ),
+      ToolIconButton(
+        icon: Icons.join_full_rounded,
+        label: strings.toolGroup,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.group),
       ),
       ToolIconButton(
         icon: Icons.copy_rounded,

@@ -16,6 +16,7 @@ import '../../../core/utils/time_utils.dart';
 import '../../../data/datasources/remote/http_ai_backend.dart';
 import '../../../domain/repositories/ai_repository.dart';
 import '../../viewmodels/ai_settings_controller.dart';
+import '../../viewmodels/preview_prefs.dart';
 import '../../widgets/common/glass_panel.dart';
 
 final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(
@@ -59,6 +60,39 @@ class SettingsScreen extends ConsumerWidget {
             selected: {themeMode},
             onSelectionChanged: (selection) =>
                 ref.read(themeModeProvider.notifier).set(selection.first),
+          ),
+
+          const SectionHeader(title: 'Preview'),
+          Consumer(
+            builder: (context, ref, _) {
+              final quality = ref.watch(previewQualityProvider);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SegmentedButton<PreviewQuality>(
+                    segments: [
+                      for (final option in PreviewQuality.values)
+                        ButtonSegment(
+                          value: option,
+                          label: Text(option.label),
+                        ),
+                    ],
+                    selected: {quality},
+                    onSelectionChanged: (selection) => ref
+                        .read(previewQualityProvider.notifier)
+                        .set(selection.first),
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Text(
+                    'Heavy media gets a lightweight preview copy so scrubbing '
+                    'stays smooth. Exports always use the original file.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
 
           SectionHeader(title: strings.language),

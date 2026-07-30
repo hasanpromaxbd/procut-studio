@@ -6,6 +6,8 @@
 /// stack intact, so the future is still reachable until a new edit forks it.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,13 +15,35 @@ import '../../../../core/theme/app_dimens.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
 
-class HistorySheet extends ConsumerWidget {
+class HistorySheet extends ConsumerStatefulWidget {
   const HistorySheet({required this.projectId, super.key});
 
   final String projectId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistorySheet> createState() => _HistorySheetState();
+}
+
+class _HistorySheetState extends ConsumerState<HistorySheet> {
+  List<DateTime>? _versions;
+
+  String get projectId => widget.projectId;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      ref
+          .read(editorControllerProvider(widget.projectId).notifier)
+          .listVersions()
+          .then((versions) {
+            if (mounted) setState(() => _versions = versions);
+          }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final editor = ref.watch(editorControllerProvider(projectId));
     final theme = Theme.of(context);
     if (editor == null) return const SizedBox.shrink();
@@ -83,7 +107,7 @@ class HistorySheet extends ConsumerWidget {
           ),
           const SizedBox(height: Spacing.sm),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 380),
+            constraints: const BoxConstraints(maxHeight: 300),
             child: ListView.builder(
               shrinkWrap: true,
               itemCount: deduped.length,
@@ -125,9 +149,39 @@ class HistorySheet extends ConsumerWidget {
               },
             ),
           ),
+          if (_versions != null && _versions!.isNotEmpty) ...[
+            const SizedBox(height: Spacing.md),
+            Text('Saved versions', style: theme.textTheme.titleSmall),
+            const SizedBox(height: Spacing.xs),
+            Text(
+              'Snapshots taken on every save, beyond this session\u2019s '
+              'undo. Restoring saves the current state first, so nothing is '
+              'lost either way.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            for (final (index, stamp) in _versions!.indexed)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.restore_rounded, size: 18),
+                title: Text('$stamp'.split('.').first),
+                trailing: TextButton(
+                  onPressed: () => unawaited(_restore(index)),
+                  child: const Text('Restore'),
+                ),
+              ),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _restore(int index) async {
+    final ok = await ref
+        .read(editorControllerProvider(projectId).notifier)
+        .restoreVersion(index);
+    if (ok && mounted) Navigator.of(context).pop();
   }
 }
 

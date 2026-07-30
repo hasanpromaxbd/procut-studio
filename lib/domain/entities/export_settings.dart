@@ -137,6 +137,7 @@ class ExportSettings {
     this.audioBitrateKbps = 192,
     this.audioSampleRate = 48000,
     this.useHardwareEncoder = true,
+    this.normalizeLoudness = false,
     this.fileNameOverride,
   });
 
@@ -154,6 +155,11 @@ class ExportSettings {
   /// Prefer MediaCodec. The engine falls back to software automatically if the
   /// hardware encoder rejects the stream — see `HardwareEncoderProbe`.
   final bool useHardwareEncoder;
+
+  /// Level the mix to −14 LUFS, the loudness YouTube and Spotify normalise
+  /// to anyway. Off by default: it re-levels the whole mix, and someone who
+  /// balanced their audio by ear deserves to keep that balance untouched.
+  final bool normalizeLoudness;
 
   final String? fileNameOverride;
 
@@ -215,6 +221,7 @@ class ExportSettings {
     int? audioBitrateKbps,
     int? audioSampleRate,
     bool? useHardwareEncoder,
+    bool? normalizeLoudness,
     String? fileNameOverride,
   }) => ExportSettings(
     resolution: resolution ?? this.resolution,
@@ -229,6 +236,7 @@ class ExportSettings {
     audioBitrateKbps: audioBitrateKbps ?? this.audioBitrateKbps,
     audioSampleRate: audioSampleRate ?? this.audioSampleRate,
     useHardwareEncoder: useHardwareEncoder ?? this.useHardwareEncoder,
+    normalizeLoudness: normalizeLoudness ?? this.normalizeLoudness,
     fileNameOverride: fileNameOverride ?? this.fileNameOverride,
   );
 
@@ -244,6 +252,7 @@ class ExportSettings {
     'aBitrate': audioBitrateKbps,
     'sampleRate': audioSampleRate,
     'hw': useHardwareEncoder,
+    if (normalizeLoudness) 'loudnorm': true,
     if (fileNameOverride != null) 'fileName': fileNameOverride,
   };
 
@@ -261,6 +270,7 @@ class ExportSettings {
       audioBitrateKbps: (json['aBitrate'] as num?)?.toInt() ?? 192,
       audioSampleRate: (json['sampleRate'] as num?)?.toInt() ?? 48000,
       useHardwareEncoder: json['hw'] as bool? ?? true,
+      normalizeLoudness: json['loudnorm'] as bool? ?? false,
       fileNameOverride: json['fileName'] as String?,
     );
   }

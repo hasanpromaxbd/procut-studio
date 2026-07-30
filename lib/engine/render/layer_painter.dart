@@ -36,7 +36,7 @@ abstract final class LayerPainter {
         _paintText(canvas, size, clip, localTime, transform.opacity);
       case StickerClip():
         _paintSticker(canvas, size, clip, transform.opacity);
-      case VideoClip() || AudioClip() || ImageClip():
+      case VideoClip() || AudioClip() || ImageClip() || CompoundClip():
         break; // media layers are composited by the video pipeline
     }
 

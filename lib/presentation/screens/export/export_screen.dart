@@ -333,6 +333,16 @@ class _SettingsForm extends ConsumerWidget {
           ),
 
         const SectionHeader(title: 'Audio'),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: settings.normalizeLoudness,
+          title: const Text('Platform loudness (−14 LUFS)'),
+          subtitle: const Text(
+            'Levels the mix to what YouTube and Spotify normalise to. '
+            'Leave off if you balanced the mix by ear.',
+          ),
+          onChanged: (value) => controller.setNormalizeLoudness(value),
+        ),
         LabeledSlider(
           label: 'Audio bitrate',
           value: settings.audioBitrateKbps.toDouble(),

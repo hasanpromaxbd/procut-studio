@@ -80,6 +80,8 @@ abstract class AppStrings {
   String get toolTrack;
   String get toolDelete;
   String get toolDuplicate;
+  String get toolJumpCut;
+  String get toolGroup;
 
   // ── Export ───────────────────────────────────────────────────────────
   String get startExport;
@@ -208,6 +210,10 @@ class AppStringsEn extends AppStrings {
   String get toolDelete => 'Delete';
   @override
   String get toolDuplicate => 'Duplicate';
+  @override
+  String get toolJumpCut => 'Jump cut';
+  @override
+  String get toolGroup => 'Group';
 
   @override
   String get startExport => 'Start export';
@@ -356,6 +362,10 @@ class AppStringsBn extends AppStrings {
   String get toolDelete => 'মুছুন';
   @override
   String get toolDuplicate => 'ডুপ্লিকেট';
+  @override
+  String get toolJumpCut => 'জাম্প কাট';
+  @override
+  String get toolGroup => 'গ্রুপ';
 
   @override
   String get startExport => 'এক্সপোর্ট শুরু করুন';

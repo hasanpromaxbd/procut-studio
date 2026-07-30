@@ -8,6 +8,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_dimens.dart';
 import '../../../../core/utils/time_utils.dart';
 import '../../../../domain/entities/clip.dart';
+import '../../../../domain/entities/voice_effect.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
 
@@ -95,7 +96,43 @@ class SpeedSheet extends ConsumerWidget {
                 'Off makes speed changes sound like a tape machine',
               ),
               value: clip.preservePitch,
-              onChanged: (_) {},
+              onChanged: (value) => controller.setPreservePitch(
+                preserve: value,
+              ),
+            ),
+            Row(
+              children: [
+                SizedBox(
+                  width: 60,
+                  child: Text('Shift', style: theme.textTheme.bodySmall),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: clip.pitchSemitones.clamp(-12.0, 12.0),
+                    min: -12,
+                    max: 12,
+                    divisions: 48,
+                    label:
+                        '${clip.pitchSemitones >= 0 ? '+' : ''}'
+                        '${clip.pitchSemitones.toStringAsFixed(1)} st',
+                    onChanged: controller.setPitch,
+                  ),
+                ),
+              ],
+            ),
+            const SectionHeader(title: 'Voice'),
+            Wrap(
+              spacing: Spacing.xs,
+              runSpacing: Spacing.xs,
+              children: [
+                for (final effect in VoiceEffect.values)
+                  ChoiceChip(
+                    selected: clip.voiceEffect == effect,
+                    label: Text(effect.label),
+                    tooltip: effect.blurb,
+                    onSelected: (_) => controller.setVoiceEffect(effect),
+                  ),
+              ],
             ),
           ],
           const SectionHeader(title: 'Direction'),

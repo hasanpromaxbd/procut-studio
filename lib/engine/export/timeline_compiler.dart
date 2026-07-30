@@ -38,6 +38,7 @@ import '../../domain/entities/timeline.dart';
 import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
+import '../../domain/entities/voice_effect.dart';
 import '../effects/effect_catalog.dart';
 import '../effects/mask_compiler.dart';
 import '../ffmpeg/filter_graph.dart';
@@ -638,6 +639,83 @@ class TimelineCompiler {
           outTransition: transition,
         );
 
+      case CompoundClip():
+        if (clip.innerClips.isEmpty) return null;
+
+        // The members compile through the exact machinery a real track uses —
+        // transitions between them included — into one stream the length of
+        // the compound's window. Content past the window is simply not shown,
+        // which is what makes ungrouping lossless.
+        final innerLabel = _compileVisualTrack(
+          graph: graph,
+          track: Track(
+            id: 'cmp_${clip.id}',
+            type: TrackType.video,
+            clips: clip.innerClips,
+          ),
+          project: project,
+          settings: const ExportSettings(),
+          outWidth: outWidth,
+          outHeight: outHeight,
+          fps: fps,
+          timelineDuration: clip.duration,
+          workspaceDir: workspaceDir,
+          registerInput: registerInput,
+          rasterSteps: rasterSteps,
+          preRenderSteps: preRenderSteps,
+          commandScripts: commandScripts,
+          warnings: warnings,
+          preferFastTransitions: false,
+        );
+        if (innerLabel == null) return null;
+
+        // The compound's own dressing applies to the composed result, the
+        // way it would to any single clip.
+        final chain = graph.chain(inputs: [innerLabel], outputs: [label]);
+        var dressed = false;
+        final scale = clip.transform.scaleX.staticValue;
+        if ((scale - 1).abs() > 0.001) {
+          chain.then(
+            Filter('scale', {
+              'w': 'iw*${FilterGraph.formatDouble(scale)}',
+              'h':
+                  'ih*${FilterGraph.formatDouble(clip.transform.scaleY.staticValue)}',
+              'flags': 'bicubic',
+            }),
+          );
+          chain.thenAll(Filters.scaleToFit(outWidth, outHeight));
+          dressed = true;
+        }
+        if (clip.transform.flipHorizontal) {
+          chain.then(Filters.hflip());
+          dressed = true;
+        }
+        if (clip.transform.flipVertical) {
+          chain.then(Filters.vflip());
+          dressed = true;
+        }
+        _collectAutomation(
+          _appendEffects(chain, clip, workspaceDir),
+          commandScripts,
+          warnings,
+        );
+        final maskFilters = MaskCompiler.build(
+          clip.mask.resolveAt(Duration.zero),
+        );
+        chain.thenAll(maskFilters);
+        _appendOpacity(chain, clip.transform);
+        if (!dressed &&
+            chain.filters.isEmpty) {
+          // An empty chain is an FFmpeg parse error; `null` is a passthrough.
+          chain.then(Filter('null'));
+        }
+
+        return _Segment(
+          label: label,
+          duration: clip.duration,
+          outTransition: transition,
+        );
+
       case AudioClip():
         return null; // handled by the audio pass
     }
@@ -961,7 +1039,20 @@ class TimelineCompiler {
     for (final track in timeline.tracks) {
       if (!timeline.isTrackAudible(track)) continue;
 
-      for (final clip in track.clips) {
+      // Grouped members carry their audio with them: each inner clip joins
+      // the mix at the compound's offset, clipped to its window.
+      final audible = <Clip>[
+        for (final clip in track.clips)
+          if (clip is CompoundClip) ...[
+            if (clip.enabled)
+              for (final inner in clip.innerClips)
+                if (inner.enabled && inner.start < clip.duration)
+                  inner.copyWithBase(start: clip.start + inner.start),
+          ] else
+            clip,
+      ];
+
+      for (final clip in audible) {
         if (!clip.enabled) continue;
 
         final _AudioSource? source = switch (clip) {
@@ -979,6 +1070,7 @@ class TimelineCompiler {
             fadeOut: clip.fadeOut,
             equalizer: clip.equalizer,
             reversed: clip.reversed,
+            voiceEffect: clip.voiceEffect,
           ),
           VideoClip() when !clip.muted && !clip.isFrozen => _AudioSource(
             assetId: clip.assetId,
@@ -994,6 +1086,7 @@ class TimelineCompiler {
             fadeOut: clip.audioFadeOut,
             equalizer: null,
             reversed: clip.reversed,
+            voiceEffect: VoiceEffect.none,
           ),
           _ => null,
         };
@@ -1038,14 +1131,17 @@ class TimelineCompiler {
           }
         }
 
-        if (source.pitchSemitones.abs() > 0.01) {
+        final totalPitch =
+            source.pitchSemitones + source.voiceEffect.semitones;
+        if (totalPitch.abs() > 0.01) {
           chain.thenAll(
             Filters.pitchShift(
-              source.pitchSemitones,
+              totalPitch,
               sampleRate: settings.audioSampleRate,
             ),
           );
         }
+        chain.thenAll(Filters.voiceEffect(source.voiceEffect));
 
         final eq = source.equalizer;
         if (eq != null && !eq.isFlat) {
@@ -1116,17 +1212,31 @@ class TimelineCompiler {
 
     final stemLabels = ducked.values.toList();
     final mixed = graph.newLabel('aout');
-    if (stemLabels.length == 1) {
-      graph
-          .chain(inputs: stemLabels, outputs: [mixed])
-          .then(Filters.atrim(Duration.zero, timelineDuration))
-          .then(Filters.resetAudioPts());
-    } else {
-      graph
-          .chain(inputs: stemLabels, outputs: [mixed])
-          .then(Filters.mixAudio(stemLabels.length))
-          .then(Filters.atrim(Duration.zero, timelineDuration))
-          .then(Filters.resetAudioPts());
+    final chain = graph.chain(inputs: stemLabels, outputs: [mixed]);
+    if (stemLabels.length > 1) {
+      chain.then(Filters.mixAudio(stemLabels.length));
+    }
+    chain
+      ..then(Filters.atrim(Duration.zero, timelineDuration))
+      ..then(Filters.resetAudioPts());
+
+    if (settings.normalizeLoudness) {
+      // Single-pass loudnorm: it adapts as it goes rather than measuring the
+      // whole mix first, which can breathe a little on very dynamic audio.
+      // The honest two-pass variant needs the finished mix before the encode
+      // starts — a second full render. For −14 LUFS platform delivery the
+      // single pass lands within a fraction of an LU, and the settings sheet
+      // says what it does rather than overpromising.
+      chain.then(
+        Filter('loudnorm', {
+          'I': -14,
+          'TP': -1.5,
+          'LRA': 11,
+        }),
+      );
+      // loudnorm resamples internally to 192 kHz; bring the stream back to
+      // the container's rate or the encode fails on a rate mismatch.
+      chain.then(Filter('aresample')..arg('${settings.audioSampleRate}'));
     }
 
     if (totalStems > 8) {
@@ -1256,6 +1366,7 @@ class _AudioSource {
     required this.fadeOut,
     required this.equalizer,
     required this.reversed,
+    required this.voiceEffect,
   });
 
   final String assetId;
@@ -1271,4 +1382,5 @@ class _AudioSource {
   final Duration fadeOut;
   final EqualizerSettings? equalizer;
   final bool reversed;
+  final VoiceEffect voiceEffect;
 }

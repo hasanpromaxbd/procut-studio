@@ -31,10 +31,16 @@ enum TrackType {
       TrackType.values.firstWhere((e) => e.id == id, orElse: () => TrackType.video);
 
   bool accepts(ClipKind kind) => switch (this) {
-    TrackType.video => kind == ClipKind.video || kind == ClipKind.image,
+    TrackType.video =>
+      kind == ClipKind.video ||
+          kind == ClipKind.image ||
+          kind == ClipKind.compound,
     TrackType.audio => kind == ClipKind.audio,
     TrackType.overlay =>
-      kind == ClipKind.video || kind == ClipKind.image || kind == ClipKind.sticker,
+      kind == ClipKind.video ||
+          kind == ClipKind.image ||
+          kind == ClipKind.sticker ||
+          kind == ClipKind.compound,
     TrackType.text => kind == ClipKind.text,
     TrackType.sticker => kind == ClipKind.sticker,
     // An adjustment clip is a span with effects on it; an image clip is the
@@ -49,6 +55,7 @@ enum TrackType {
     ClipKind.audio => TrackType.audio,
     ClipKind.text => TrackType.text,
     ClipKind.sticker => TrackType.sticker,
+    ClipKind.compound => TrackType.video,
   };
 
   bool get isVisual => this != TrackType.audio;

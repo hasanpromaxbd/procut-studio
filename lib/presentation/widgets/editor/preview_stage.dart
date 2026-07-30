@@ -42,6 +42,7 @@ import '../../../engine/render/shader_library.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
+import '../../viewmodels/preview_prefs.dart';
 import 'guides_overlay.dart';
 
 /// Above this many simultaneous video layers we stop creating decoders.
@@ -202,6 +203,28 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           painter: _LayerCustomPainter(clip: clip, localTime: local),
         );
 
+      case CompoundClip():
+        // Grouped content renders exactly as it did before grouping: each
+        // member laid out in the compound's local time. The compound's own
+        // transform/opacity wrap the stack below, like any other layer.
+        final localPlayhead = playhead - clip.start;
+        content = Stack(
+          fit: StackFit.expand,
+          children: [
+            for (final inner in clip.innerClips)
+              if (inner.enabled &&
+                  inner.containsTime(localPlayhead) &&
+                  inner is! AudioClip)
+                _buildLayer(
+                  clip: inner,
+                  project: project,
+                  playhead: localPlayhead,
+                  canvasSize: canvasSize,
+                  decoderBudgetExceeded: decoderBudgetExceeded,
+                ),
+          ],
+        );
+
       case AudioClip():
         return const SizedBox.shrink();
     }
@@ -309,10 +332,25 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     List<Clip> visible,
     PlayheadState playhead,
   ) {
+    // Grouped members need decoders too. Shifting each inner clip onto the
+    // parent's timeline start makes the ordinary sync math below apply to
+    // them unchanged.
+    final flattened = <Clip>[
+      for (final clip in visible)
+        if (clip is CompoundClip)
+          ...[
+            for (final inner in clip.innerClips)
+              if (inner.enabled)
+                inner.copyWithBase(start: clip.start + inner.start),
+          ]
+        else
+          clip,
+    ];
+
     final needed = <String>{};
     var budget = 0;
 
-    for (final clip in visible) {
+    for (final clip in flattened) {
       if (clip is! VideoClip) continue;
       if (budget >= _maxConcurrentDecoders) break;
       needed.add(clip.assetId);
@@ -338,9 +376,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
       final controller = _controllers[assetId]!;
       if (!controller.value.isInitialized) continue;
 
-      final clip = visible.whereType<VideoClip>().firstWhere(
+      final clip = flattened.whereType<VideoClip>().firstWhere(
         (c) => c.assetId == assetId,
-        orElse: () => visible.whereType<VideoClip>().first,
+        orElse: () => flattened.whereType<VideoClip>().first,
       );
       _syncPlayback(controller, clip, playhead);
     }
@@ -385,8 +423,12 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     _initialising.add(asset.id);
 
     // Prefer the proxy: scrubbing 4K through the preview decoder is what makes
-    // an editor feel broken.
-    final controller = VideoPlayerController.file(File(asset.previewPath));
+    // an editor feel broken. The user can insist on the original in Settings.
+    final quality = ref.read(previewQualityProvider);
+    final path = quality == PreviewQuality.original
+        ? asset.path
+        : asset.previewPath;
+    final controller = VideoPlayerController.file(File(path));
     controller
         .initialize()
         .then((_) {

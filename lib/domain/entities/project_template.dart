@@ -42,6 +42,7 @@ class TemplateSlot {
     ClipKind.video => assetKind == AssetKind.video,
     ClipKind.image => assetKind == AssetKind.image,
     ClipKind.audio => assetKind == AssetKind.audio,
+    ClipKind.compound => false,
     ClipKind.text || ClipKind.sticker => false,
   };
 

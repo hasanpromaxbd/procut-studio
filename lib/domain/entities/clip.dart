@@ -15,13 +15,17 @@ import 'mask.dart';
 import 'text_style_spec.dart';
 import 'transform2d.dart';
 import 'transition.dart';
+import 'voice_effect.dart';
 
 enum ClipKind {
   video('video'),
   audio('audio'),
   image('image'),
   text('text'),
-  sticker('sticker');
+  sticker('sticker'),
+
+  /// A group of clips behaving as one — see [CompoundClip].
+  compound('compound');
 
   const ClipKind(this.id);
   final String id;
@@ -132,6 +136,7 @@ sealed class Clip {
         ClipKind.image => ImageClip.fromJson(json),
         ClipKind.text => TextClip.fromJson(json),
         ClipKind.sticker => StickerClip.fromJson(json),
+        ClipKind.compound => CompoundClip.fromJson(json),
       };
 
   static EffectStage _stageOf(EffectType type) => switch (type) {
@@ -480,6 +485,7 @@ final class AudioClip extends MediaClip {
     this.preservePitch = true,
     this.equalizer = const EqualizerSettings(),
     this.isVoiceOver = false,
+    this.voiceEffect = VoiceEffect.none,
   });
 
   final AnimatableDouble volume;
@@ -499,6 +505,9 @@ final class AudioClip extends MediaClip {
   /// Marks clips captured by the in-app recorder, so the UI can offer voice
   /// isolation and noise reduction up front.
   final bool isVoiceOver;
+
+  /// Character preset — robot, telephone, echo. Composes with [pitchSemitones].
+  final VoiceEffect voiceEffect;
 
   @override
   ClipKind get kind => ClipKind.audio;
@@ -536,6 +545,7 @@ final class AudioClip extends MediaClip {
     bool? preservePitch,
     EqualizerSettings? equalizer,
     bool? isVoiceOver,
+    VoiceEffect? voiceEffect,
   }) => AudioClip(
     id: id ?? this.id,
     trackId: trackId ?? this.trackId,
@@ -560,6 +570,7 @@ final class AudioClip extends MediaClip {
     preservePitch: preservePitch ?? this.preservePitch,
     equalizer: equalizer ?? this.equalizer,
     isVoiceOver: isVoiceOver ?? this.isVoiceOver,
+    voiceEffect: voiceEffect ?? this.voiceEffect,
   );
 
   @override
@@ -599,6 +610,7 @@ final class AudioClip extends MediaClip {
     if (!preservePitch) 'preservePitch': false,
     if (!equalizer.isFlat) 'eq': equalizer.toJson(),
     if (isVoiceOver) 'vo': true,
+    if (voiceEffect.isActive) 'voiceFx': voiceEffect.name,
   };
 
   factory AudioClip.fromJson(Map<String, dynamic> json) => AudioClip(
@@ -629,6 +641,7 @@ final class AudioClip extends MediaClip {
       (json['eq'] as Map?)?.cast<String, dynamic>(),
     ),
     isVoiceOver: json['vo'] as bool? ?? false,
+    voiceEffect: VoiceEffect.fromId(json['voiceFx'] as String?),
   );
 }
 
@@ -1110,4 +1123,130 @@ double _fadeGain(
     }
   }
   return gain;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Compound
+// ─────────────────────────────────────────────────────────────────────────
+
+/// A group of clips that moves, trims and renders as one block.
+///
+/// v1 is deliberately **single-track**: the members all came from one track,
+/// and their relative timing (including transitions between them) is
+/// preserved inside. Grouping across tracks is refused with a message rather
+/// than half-supported — a compound that silently dropped its title track
+/// would be worse than none.
+///
+/// Inner clip `start` values are relative to the compound's own zero. The
+/// compound's `duration` is a window: trimming the tail hides content without
+/// destroying it, which is what makes ungrouping lossless.
+final class CompoundClip extends Clip {
+  const CompoundClip({
+    required super.id,
+    required super.trackId,
+    required super.start,
+    required super.duration,
+    required this.innerClips,
+    super.label,
+    super.locked,
+    super.enabled,
+    super.transform,
+    super.effects,
+    super.outTransition,
+    super.mask,
+  });
+
+  /// Members, in timeline order, starts relative to the compound. Never
+  /// contains another compound — nesting stops at one level in v1.
+  final List<Clip> innerClips;
+
+  @override
+  ClipKind get kind => ClipKind.compound;
+
+  /// How long the grouped content actually is, independent of the window.
+  Duration get contentDuration => innerClips.isEmpty
+      ? Duration.zero
+      : innerClips.map((c) => c.end).reduce((a, b) => a > b ? a : b);
+
+  CompoundClip copyWith({
+    String? id,
+    String? trackId,
+    Duration? start,
+    Duration? duration,
+    List<Clip>? innerClips,
+    String? label,
+    bool? locked,
+    bool? enabled,
+    Transform2D? transform,
+    List<Effect>? effects,
+    Transition? outTransition,
+    Mask? mask,
+    bool clearTransition = false,
+  }) => CompoundClip(
+    id: id ?? this.id,
+    trackId: trackId ?? this.trackId,
+    start: start ?? this.start,
+    duration: duration ?? this.duration,
+    innerClips: innerClips ?? this.innerClips,
+    label: label ?? this.label,
+    locked: locked ?? this.locked,
+    enabled: enabled ?? this.enabled,
+    transform: transform ?? this.transform,
+    effects: effects ?? this.effects,
+    outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
+    mask: mask ?? this.mask,
+  );
+
+  @override
+  CompoundClip copyWithBase({
+    Duration? start,
+    Duration? duration,
+    String? trackId,
+    String? label,
+    bool? locked,
+    bool? enabled,
+    Transform2D? transform,
+    List<Effect>? effects,
+    Transition? outTransition,
+    Mask? mask,
+    bool clearTransition = false,
+  }) => copyWith(
+    start: start,
+    duration: duration,
+    trackId: trackId,
+    label: label,
+    locked: locked,
+    enabled: enabled,
+    transform: transform,
+    effects: effects,
+    outTransition: outTransition,
+    clearTransition: clearTransition,
+    mask: mask,
+  );
+
+  @override
+  Map<String, dynamic> toJson() => {
+    ...baseJson(),
+    'inner': innerClips.map((c) => c.toJson()).toList(),
+  };
+
+  factory CompoundClip.fromJson(Map<String, dynamic> json) => CompoundClip(
+    id: json['id'] as String,
+    trackId: json['trackId'] as String,
+    start: Duration(microseconds: (json['startUs'] as num?)?.toInt() ?? 0),
+    duration: Duration(microseconds: (json['durUs'] as num?)?.toInt() ?? 0),
+    innerClips: ((json['inner'] as List?) ?? const [])
+        .map((e) => Clip.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(),
+    label: json['label'] as String?,
+    locked: json['locked'] as bool? ?? false,
+    enabled: !(json['off'] as bool? ?? false),
+    transform: Transform2D.fromJson(
+      (json['transform'] as Map?)?.cast<String, dynamic>(),
+    ),
+    effects: _effectsFromJson(json),
+    outTransition: _transitionFromJson(json),
+    mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+  );
 }

@@ -265,6 +265,8 @@ class TimelinePainter extends CustomPainter {
         _paintWaveform(canvas, rect, clip, accent);
       case TextClip() || StickerClip():
         break; // label alone is enough for these compact rows
+      case CompoundClip():
+        _paintCompoundStripes(canvas, rect, accent);
     }
 
     // Gradient scrim so the label stays readable over bright footage.
@@ -416,10 +418,27 @@ class TimelinePainter extends CustomPainter {
     }
   }
 
+  /// Diagonal hatching marks a grouped block: visually distinct from media
+  /// (thumbnails) and audio (waveform) without pretending to show content.
+  void _paintCompoundStripes(Canvas canvas, Rect rect, Color accent) {
+    final paint = Paint()
+      ..color = accent.withValues(alpha: 0.25)
+      ..strokeWidth = 6;
+    for (var x = rect.left - rect.height; x < rect.right; x += 18) {
+      canvas.drawLine(
+        Offset(x, rect.bottom),
+        Offset(x + rect.height, rect.top),
+        paint,
+      );
+    }
+  }
+
   void _paintClipLabel(Canvas canvas, Rect rect, Clip clip, TrackLayout layout) {
     final label = switch (clip) {
       TextClip() => clip.text,
       StickerClip() => clip.isEmoji ? clip.emoji! : 'Sticker',
+      CompoundClip() =>
+        clip.label ?? 'Group · ${clip.innerClips.length}',
       _ => clip.label ?? clip.kind.id,
     };
 

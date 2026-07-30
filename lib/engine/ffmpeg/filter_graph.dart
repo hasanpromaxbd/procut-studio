@@ -9,6 +9,7 @@ library;
 import 'dart:math' as math;
 
 import '../../domain/entities/ducking.dart';
+import '../../domain/entities/voice_effect.dart';
 
 /// One filter invocation, e.g. `scale=w=1080:h=1920:flags=lanczos`.
 class Filter {
@@ -441,6 +442,45 @@ abstract final class Filters {
     // between words, which is the opposite of ducking.
     'makeup': 1,
   });
+
+  /// The non-pitch part of a [VoiceEffect] — pitch is folded into the
+  /// ordinary pitch stage so preset and manual pitch compose.
+  static List<Filter> voiceEffect(VoiceEffect effect) => switch (effect) {
+    VoiceEffect.none ||
+    // Pitch-only presets: everything they do happens in the pitch stage.
+    VoiceEffect.deep ||
+    VoiceEffect.helium => const [],
+    VoiceEffect.robot => [
+      // Discard phase, keep magnitude: the timbre survives, the humanity
+      // does not — which is the effect.
+      // escapeValue backslash-escapes the commas, which is the correct
+      // in-filter quoting for an expression argument.
+      Filter('afftfilt', {
+        'real': 'hypot(re,im)*sin(0)',
+        'imag': 'hypot(re,im)*cos(0)',
+        'win_size': 512,
+        'overlap': 0.75,
+      }),
+    ],
+    VoiceEffect.telephone => [
+      // The classic 300–3400 Hz phone band, plus a hard knee so it sits
+      // "in front" the way a call does.
+      Filter('highpass', {'f': 300}),
+      Filter('lowpass', {'f': 3400}),
+      Filter('acompressor', {'threshold': 0.1, 'ratio': 4, 'makeup': 2}),
+    ],
+    VoiceEffect.echo => [
+      Filter('aecho', {'in_gain': 0.8, 'out_gain': 0.9, 'delays': 500, 'decays': 0.3}),
+    ],
+    VoiceEffect.cave => [
+      Filter('aecho', {
+        'in_gain': 0.8,
+        'out_gain': 0.9,
+        'delays': '1000|1800',
+        'decays': '0.3|0.25',
+      }),
+    ],
+  };
 
   static Filter mixAudio(int inputs, {String duration = 'longest'}) =>
       Filter('amix', {

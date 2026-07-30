@@ -70,6 +70,8 @@ class ExportSettingsController extends Notifier<ExportSettings> {
       state = state.copyWith(audioBitrateKbps: kbps);
   void setHardwareEncoding(bool value) =>
       state = state.copyWith(useHardwareEncoder: value);
+  void setNormalizeLoudness(bool value) =>
+      state = state.copyWith(normalizeLoudness: value);
   void setFileName(String? name) =>
       state = state.copyWith(fileNameOverride: name);
 }

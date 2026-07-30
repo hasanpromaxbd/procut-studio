@@ -24,6 +24,7 @@ import '../entities/timeline.dart';
 import '../entities/track.dart';
 import '../entities/transform2d.dart';
 import '../entities/transition.dart';
+import '../entities/voice_effect.dart';
 
 abstract final class TimelineOperations {
   // ── Split ────────────────────────────────────────────────────────────
@@ -38,6 +39,14 @@ abstract final class TimelineOperations {
     final (track, clip) = found;
     if (clip.locked) {
       return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    if (clip is CompoundClip) {
+      // Splitting a window over grouped content has no honest meaning —
+      // which half owns a member that straddles the cut? Ungroup first.
+      return const Result.err(
+        InvalidEditFailure('Ungroup before splitting a grouped clip.'),
+      );
     }
 
     final cut = TimeUtils.snapToFrame(at, timeline.fps);
@@ -197,6 +206,10 @@ abstract final class TimelineOperations {
             effects: rightEffects,
           ),
         );
+
+      case CompoundClip():
+        // Unreachable: [split] refuses compounds before dispatching here.
+        throw StateError('split() must reject CompoundClip before _splitClip');
     }
   }
 
@@ -295,6 +308,13 @@ abstract final class TimelineOperations {
           mask: mask,
         );
       case StickerClip():
+        return clip.copyWith(
+          start: newStart,
+          duration: newDuration,
+          transform: transform,
+          mask: mask,
+        );
+      case CompoundClip():
         return clip.copyWith(
           start: newStart,
           duration: newDuration,
@@ -493,6 +513,8 @@ abstract final class TimelineOperations {
       AudioClip() => clip.copyWith(id: id, start: start, clearTransition: true),
       ImageClip() => clip.copyWith(id: id, start: start, clearTransition: true),
       TextClip() => clip.copyWith(id: id, start: start, clearTransition: true),
+      CompoundClip() =>
+        clip.copyWith(id: id, start: start, clearTransition: true),
       StickerClip() => clip.copyWith(
         id: id,
         start: start,
@@ -1480,6 +1502,296 @@ abstract final class TimelineOperations {
         InvalidEditFailure('No cut point landed inside a clip.'),
       );
     }
+    return Result.ok(next);
+  }
+
+  // ── Audio character ──────────────────────────────────────────────────
+
+  /// Updates an audio clip's voice properties in one edit.
+  static Result<Timeline> updateAudioCharacter(
+    Timeline timeline,
+    String clipId, {
+    double? pitchSemitones,
+    bool? preservePitch,
+    VoiceEffect? voiceEffect,
+  }) {
+    final clip = timeline.findClip(clipId)?.$2;
+    if (clip is! AudioClip) {
+      return const Result.err(
+        InvalidEditFailure('Voice settings apply to audio clips.'),
+      );
+    }
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+    return _mapClip(
+      timeline,
+      clipId,
+      (c) => (c as AudioClip).copyWith(
+        pitchSemitones: pitchSemitones?.clamp(-12.0, 12.0),
+        preservePitch: preservePitch,
+        voiceEffect: voiceEffect,
+      ),
+    );
+  }
+
+  // ── Grouping ─────────────────────────────────────────────────────────
+
+  /// Bundles [clipIds] into one [CompoundClip] on their shared track.
+  ///
+  /// Single-track by design (v1): members must all live on one visual track.
+  /// Grouping across tracks is refused with a message rather than
+  /// half-supported — a compound that silently dropped its other tracks
+  /// would be worse than none.
+  static Result<Timeline> group(Timeline timeline, Set<String> clipIds) {
+    if (clipIds.length < 2) {
+      return const Result.err(
+        InvalidEditFailure('Select at least two clips to group.'),
+      );
+    }
+
+    final members = <Clip>[];
+    Track? host;
+    for (final id in clipIds) {
+      final found = timeline.findClip(id);
+      if (found == null) {
+        return const Result.err(InvalidEditFailure('Clip not found.'));
+      }
+      final (track, clip) = found;
+      if (host != null && track.id != host.id) {
+        return const Result.err(
+          InvalidEditFailure(
+            'Grouping works within one track — group each track separately.',
+          ),
+        );
+      }
+      host = track;
+      if (clip.locked) {
+        return const Result.err(
+          InvalidEditFailure('A locked clip cannot be grouped.'),
+        );
+      }
+      if (clip is CompoundClip) {
+        return const Result.err(
+          InvalidEditFailure('Groups cannot contain groups.'),
+        );
+      }
+      members.add(clip);
+    }
+    if (host == null || !host.type.isVisual) {
+      return const Result.err(
+        InvalidEditFailure('Grouping works on video and overlay tracks.'),
+      );
+    }
+
+    members.sort((a, b) => a.start.compareTo(b.start));
+    final from = members.first.start;
+    final to = members.map((c) => c.end).reduce(TimeUtils.max);
+
+    // A stranger inside the span would collide with the block. The user can
+    // see exactly which clip is in the way, so name it.
+    for (final other in host.clips) {
+      if (clipIds.contains(other.id)) continue;
+      if (other.start < to && from < other.end) {
+        return Result.err(
+          InvalidEditFailure(
+            'The selection wraps around "'
+            '${other.label ?? other.kind.id}" — include it or move it first.',
+          ),
+        );
+      }
+    }
+
+    // The last member's outgoing transition points at a clip that is no
+    // longer its neighbour, so it is dropped; the ones between members ride
+    // along inside.
+    final inner = <Clip>[
+      for (final (index, clip) in members.indexed)
+        clip.copyWithBase(
+          start: clip.start - from,
+          trackId: 'inner',
+          clearTransition: index == members.length - 1,
+        ),
+    ];
+
+    final compound = CompoundClip(
+      id: IdGenerator.clip(),
+      trackId: host.id,
+      start: from,
+      duration: to - from,
+      innerClips: inner,
+      label: 'Group · ${inner.length}',
+    );
+
+    final nextTrack = host.withClips([
+      ...host.clips.where((c) => !clipIds.contains(c.id)),
+      compound,
+    ]);
+    return Result.ok(timeline.replaceTrack(nextTrack));
+  }
+
+  /// Dissolves a compound back into its members, exactly where they were.
+  static Result<Timeline> ungroup(Timeline timeline, String clipId) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip is! CompoundClip) {
+      return const Result.err(InvalidEditFailure('That is not a group.'));
+    }
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final restored = <Clip>[
+      for (final inner in clip.innerClips)
+        inner.copyWithBase(
+          start: clip.start + inner.start,
+          trackId: track.id,
+        ),
+    ];
+
+    // The compound may have been moved next to other clips since grouping;
+    // its window fit, but a member trimmed shorter than the window did not
+    // reserve the space. Check every landing spot.
+    final others = track.clips.where((c) => c.id != clipId).toList();
+    for (final member in restored) {
+      for (final other in others) {
+        if (member.overlaps(other)) {
+          return const Result.err(
+            InvalidEditFailure('Not enough room here to ungroup.'),
+          );
+        }
+      }
+    }
+
+    return Result.ok(
+      timeline.replaceTrack(track.withClips([...others, ...restored])),
+    );
+  }
+
+  // ── Silence removal ──────────────────────────────────────────────────
+
+  /// Cuts [sourceSpans] (ranges of the clip's *asset*, in source time) out of
+  /// [clipId], closing each gap.
+  ///
+  /// Spans are applied latest-first for the same reason [razor] works that
+  /// way: removing 40–42s never moves what lives at 10s, so earlier spans
+  /// stay valid while later ones are consumed.
+  ///
+  /// Only the named clip's track ripples. That is the honest jump-cut
+  /// behaviour — other tracks (music, titles) hold position, exactly like
+  /// every NLE's single-track ripple.
+  static Result<Timeline> removeSilences(
+    Timeline timeline,
+    String clipId,
+    List<({Duration start, Duration end})> sourceSpans,
+  ) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final clip = found.$2;
+    if (clip is! MediaClip) {
+      return const Result.err(
+        InvalidEditFailure('Only audio or video can have silences removed.'),
+      );
+    }
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+    if (clip.reversed) {
+      return const Result.err(
+        InvalidEditFailure(
+          'Un-reverse the clip first — silence positions flip with it.',
+        ),
+      );
+    }
+    if (clip.hasSpeedRamp) {
+      return const Result.err(
+        InvalidEditFailure('Remove the speed ramp first.'),
+      );
+    }
+
+    // Source time → timeline time, for this clip's window and speed.
+    Duration toTimeline(Duration source) =>
+        clip.start + TimeUtils.scale(source - clip.sourceIn, clip.speed);
+
+    // Clamp to the clip's window, convert, keep only spans big enough to
+    // matter once snapped to frames.
+    final ranges = <({Duration start, Duration end})>[];
+    for (final span in sourceSpans) {
+      final from = TimeUtils.max(span.start, clip.sourceIn);
+      final to = TimeUtils.min(span.end, clip.sourceOut);
+      if (to <= from) continue;
+      final start = TimeUtils.snapToFrame(toTimeline(from), timeline.fps);
+      final end = TimeUtils.snapToFrame(toTimeline(to), timeline.fps);
+      if (end - start < AppConstants.minClipDuration) continue;
+      ranges.add((start: start, end: end));
+    }
+    if (ranges.isEmpty) {
+      return const Result.err(
+        InvalidEditFailure('No removable silence inside this clip.'),
+      );
+    }
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+
+    var next = timeline;
+    final currentId = clipId;
+
+    for (final range in ranges.reversed) {
+      final target = next.findClip(currentId)?.$2;
+      if (target == null) break;
+
+      final touchesHead = range.start <= target.start;
+      final touchesTail = range.end >= target.end;
+
+      if (touchesHead && touchesTail) {
+        // The whole clip is silence — remove it outright.
+        final result = delete(next, currentId, ripple: true);
+        if (result is Err<Timeline>) return result;
+        next = result.getOrElse(next);
+        break;
+      } else if (touchesTail) {
+        final result = trimEnd(next, currentId, range.start);
+        if (result is Err<Timeline>) return result;
+        next = result.getOrElse(next);
+      } else if (touchesHead) {
+        // Trim then close the gap the head-trim leaves behind.
+        final trimmed = trimStart(next, currentId, range.end);
+        if (trimmed is Err<Timeline>) return trimmed;
+        next = trimmed.getOrElse(next);
+        final moved = move(next, currentId, range.start);
+        if (moved is Err<Timeline>) return moved;
+        next = moved.getOrElse(next);
+      } else {
+        // Interior span: cut both ends, drop the middle, close the gap.
+        var result = split(next, currentId, range.end);
+        if (result is Err<Timeline>) return result;
+        next = result.getOrElse(next);
+
+        result = split(next, currentId, range.start);
+        if (result is Err<Timeline>) return result;
+        next = result.getOrElse(next);
+
+        final middle = next.findClip(currentId) == null
+            ? null
+            : next.tracks
+                  .firstWhere((t) => t.id == target.trackId)
+                  .clipAt(range.start);
+        if (middle == null) {
+          return const Result.err(
+            InvalidEditFailure('Internal error locating the silent piece.'),
+          );
+        }
+        result = delete(next, middle.id, ripple: true);
+        if (result is Err<Timeline>) return result;
+        next = result.getOrElse(next);
+        // Earlier spans live in the left piece, which kept [currentId].
+      }
+    }
+
     return Result.ok(next);
   }
 

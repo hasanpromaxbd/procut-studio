@@ -30,10 +30,12 @@ import '../../domain/entities/timeline.dart';
 import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
+import '../../domain/entities/voice_effect.dart';
 import '../../domain/repositories/ai_repository.dart';
 import '../../domain/repositories/media_repository.dart';
 import '../../domain/repositories/project_repository.dart';
 import '../../domain/usecases/timeline_operations.dart';
+import '../../engine/audio/silence_detector.dart';
 import '../../engine/effects/effect_catalog.dart';
 import 'editor_state.dart';
 import 'playhead_controller.dart';
@@ -843,6 +845,139 @@ class EditorController extends Notifier<EditorState?> {
     final current = state;
     if (current == null) return;
     _apply(operation(current.timeline), label);
+  }
+
+  // ── Audio character ──────────────────────────────────────────────────
+
+  void setPitch(double semitones) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.updateAudioCharacter(
+      timeline,
+      clipId,
+      pitchSemitones: semitones,
+    ),
+    'pitch',
+  );
+
+  void setPreservePitch({required bool preserve}) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.updateAudioCharacter(
+      timeline,
+      clipId,
+      preservePitch: preserve,
+    ),
+    preserve ? 'keep pitch' : 'tape-style pitch',
+  );
+
+  void setVoiceEffect(VoiceEffect effect) => _applyToSelection(
+    (timeline, clipId) => TimelineOperations.updateAudioCharacter(
+      timeline,
+      clipId,
+      voiceEffect: effect,
+    ),
+    effect.isActive ? effect.label.toLowerCase() : 'clear voice effect',
+  );
+
+  // ── Versions ─────────────────────────────────────────────────────────
+
+  /// Snapshots available for this project, newest first.
+  Future<List<DateTime>> listVersions() async {
+    final result = await _projects.listBackups(projectId);
+    return result.getOrElse(const []);
+  }
+
+  /// Replaces the current project with a stored snapshot.
+  ///
+  /// The current state is saved first, so the state being abandoned becomes
+  /// the newest backup — restoring is never a one-way door.
+  Future<bool> restoreVersion(int index) async {
+    await flush();
+    final result = await _projects.restoreBackup(projectId, index);
+    return result.fold(
+      (project) {
+        state = EditorState(project: project);
+        ref.read(playheadControllerProvider.notifier)
+          ..setDuration(project.duration)
+          ..seek(Duration.zero);
+        _log.i('version restored', fields: {'index': index});
+        return true;
+      },
+      (failure) {
+        state = state?.copyWith(errorMessage: failure.message);
+        return false;
+      },
+    );
+  }
+
+  // ── Grouping ─────────────────────────────────────────────────────────
+
+  /// Groups the selection, or dissolves it when exactly one group is
+  /// selected — one button, both directions, no mode.
+  void toggleGroup() {
+    final current = state;
+    if (current == null || !current.hasSelection) return;
+
+    final selected = current.selectedClips;
+    if (selected.length == 1 && selected.single is CompoundClip) {
+      _apply(
+        TimelineOperations.ungroup(current.timeline, selected.single.id),
+        'ungroup',
+      );
+      return;
+    }
+    _apply(
+      TimelineOperations.group(current.timeline, current.selectedClipIds),
+      'group ${current.selectedClipIds.length} clips',
+    );
+  }
+
+  // ── Silence removal ──────────────────────────────────────────────────
+
+  /// Detects silences in the selected clip's audio, without cutting anything.
+  ///
+  /// Returns the spans in *source* time so the sheet can show them and then
+  /// hand the approved list to [removeSilences]. Detection and application
+  /// are separate on purpose: an auto-cutter you cannot preview is an
+  /// auto-cutter you cannot trust.
+  Future<List<SilenceSpan>> detectSilences({
+    double threshold = 0.12,
+    Duration minSilence = const Duration(milliseconds: 450),
+  }) async {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return const [];
+
+    final clip = current.timeline.findClip(clipId)?.$2;
+    if (clip is! MediaClip) return const [];
+    final asset = current.project.asset(clip.assetId);
+    if (asset == null || !asset.hasAudioStream) return const [];
+
+    final peaks = await _media.waveform(asset);
+    return peaks.fold(
+      (data) => SilenceDetector.detect(
+        data,
+        threshold: threshold,
+        minSilence: minSilence,
+      ),
+      (failure) {
+        state = state?.copyWith(errorMessage: failure.message);
+        return const [];
+      },
+    );
+  }
+
+  /// Cuts the given silences out of the selected clip in one undo step.
+  void removeSilences(List<SilenceSpan> spans) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null || spans.isEmpty) return;
+
+    _apply(
+      TimelineOperations.removeSilences(
+        current.timeline,
+        clipId,
+        [for (final s in spans) (start: s.start, end: s.end)],
+      ),
+      'remove ${spans.length} silence(s)',
+    );
   }
 
   // ── Ken Burns ────────────────────────────────────────────────────────
