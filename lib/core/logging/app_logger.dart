@@ -218,6 +218,12 @@ class Log {
 }
 
 /// Installs global handlers so nothing dies silently.
+/// Set by the crash reporter once storage is ready. Uncaught errors that
+/// happen before that (during bootstrap) still reach the log; they just have
+/// nowhere durable to go yet.
+void Function(Object error, StackTrace? stack, {required bool fatal})?
+    onUncaughtError;
+
 void installGlobalErrorHandlers() {
   const log = Log('Uncaught');
   final previous = FlutterError.onError;
@@ -227,10 +233,12 @@ void installGlobalErrorHandlers() {
       error: details.exception,
       stackTrace: details.stack,
     );
+    onUncaughtError?.call(details.exception, details.stack, fatal: true);
     previous?.call(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     log.e('Unhandled async error', error: error, stackTrace: stack);
+    onUncaughtError?.call(error, stack, fatal: false);
     return true; // handled — do not crash the app over an isolate error
   };
 }

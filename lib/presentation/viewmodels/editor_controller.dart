@@ -166,6 +166,24 @@ class EditorController extends Notifier<EditorState?> {
     _scheduleSave();
   }
 
+  /// Steps the edit state [steps] entries back (positive) or forward
+  /// (negative) through history in one gesture.
+  ///
+  /// Implemented as repeated undo/redo rather than a direct jump so the
+  /// stacks stay exactly as if the user had tapped the buttons that many
+  /// times — including being able to change their mind and come back.
+  void jumpHistory(int steps) {
+    if (steps > 0) {
+      for (var i = 0; i < steps && (state?.canUndo ?? false); i++) {
+        undo();
+      }
+    } else {
+      for (var i = 0; i < -steps && (state?.canRedo ?? false); i++) {
+        redo();
+      }
+    }
+  }
+
   // ── Selection ────────────────────────────────────────────────────────
 
   /// Replaces the selection. Pass null to clear.

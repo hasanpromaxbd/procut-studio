@@ -154,14 +154,17 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
   ) async {
     for (final track in timeline.tracks) {
       for (final clip in track.clips) {
-        if (clip is! AudioClip) continue;
-        final assetId = clip.assetId;
+        // Video clips carry audio too; their embedded track gets the same
+        // waveform strip, which is how you cut dialogue without opening a
+        // separate audio track.
+        if (clip is! AudioClip && clip is! VideoClip) continue;
+        final assetId = (clip as MediaClip).assetId;
         if (_waveforms.containsKey(assetId) ||
             _waveformRequests.contains(assetId)) {
           continue;
         }
         final asset = assets[assetId];
-        if (asset == null) continue;
+        if (asset == null || !asset.hasAudioStream) continue;
 
         _waveformRequests.add(assetId);
         final result = await ref.read(mediaRepositoryProvider).waveform(asset);

@@ -42,6 +42,7 @@ import '../../../engine/render/shader_library.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
+import 'guides_overlay.dart';
 
 /// Above this many simultaneous video layers we stop creating decoders.
 const int _maxConcurrentDecoders = 4;
@@ -124,6 +125,14 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           ),
         );
 
+        // Guides stack *outside* the RepaintBoundary on purpose: the
+        // eyedropper and the scopes rasterise the boundary, and a measurement
+        // that includes the guide lines would be quietly wrong.
+        final withGuides = Stack(
+          fit: StackFit.expand,
+          children: [stage, const GuidesOverlay()],
+        );
+
         return Center(
           child: SizedBox(
             width: width,
@@ -131,9 +140,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
             child: eyedropper.isActive
                 ? _SamplingOverlay(
                     projectId: widget.projectId,
-                    child: stage,
+                    child: withGuides,
                   )
-                : stage,
+                : withGuides,
           ),
         );
       },

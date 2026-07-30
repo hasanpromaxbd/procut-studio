@@ -88,6 +88,16 @@ class PathService {
 
   Directory get tempDir => _temp ?? Directory.systemTemp;
 
+  /// Crash reports. Documents, not cache: a crash log the OS reclaims before
+  /// anyone reads it never happened.
+  Directory get crashesDir =>
+      Directory(p.join(_docs.path, 'crashes'));
+
+  File diagnosticsFile() => File(
+    p.join(tempDir.path,
+        'procut-diagnostics-${DateTime.now().millisecondsSinceEpoch}.txt'),
+  );
+
   // ── File builders ─────────────────────────────────────────────────────
   File projectBackupFile(String projectId, int index) => File(
     p.join(backupsDir.path, '$projectId.$index.json'),

@@ -5,8 +5,9 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 199 tests passing, debug and release
-APKs build.
+Verified state: `flutter analyze` clean, 243 tests passing, debug and release
+APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh` and
+`tool/verify_ducking.sh` all pass against real impellerc/ffmpeg binaries.
 
 ---
 
@@ -245,6 +246,33 @@ declaring the wrong type on Android 14 is a hard crash, not a warning.
 suits an editor better than tabs |
 
 ---
+
+## Second wave (July 2026)
+
+| Feature | Status |
+|---|---|
+| Selection-aware commands — every edit acts on the whole multi-selection | Implemented + tested |
+| Slip / slide / roll three-point trims | Implemented + tested — compound edits refuse rather than clamp |
+| Beat-synced auto-cut (razor across beat markers, every-nth control) | Implemented + tested — cuts applied latest-first |
+| Ken Burns camera moves on stills | Implemented + tested — preview via keyframes, export via `zoompan` (verified against real ffmpeg) |
+| Audio ducking (per-track side-chain, strength/sensitivity/release) | Implemented + tested — `tool/verify_ducking.sh` measures a real 6 dB duck |
+| Colour scopes: histogram, waveform, RGB parade, vectorscope | Implemented — measures the preview raster, and says so |
+| Composition guides: safe zones, thirds, golden ratio, centre, social-UI shade | Implemented — drawn outside the sampled boundary so scopes stay honest |
+| Waveforms on video clips (embedded audio strip) | Implemented |
+| Keyboard shortcuts + generated cheat sheet (Shift+?) | Implemented — one table drives both bindings and help |
+| Undo history scrubber (jump anywhere in the stack) | Implemented |
+| Export queue (snapshot at enqueue, strictly serial) | Implemented |
+| Bengali localisation (hand-written, compiler-enforced parity) | Implemented + tested — Devanagari-leak test, danda-aware |
+| Crash reporting (local-only, breadcrumbed, shareable diagnostics) | Implemented — nothing leaves the device unless the user shares it |
+| End-to-end integration test (edit → persist → compile) | Implemented — caught the Ken Burns export gap on its first run |
+
+The camera-move export renders endpoints with a smoothstep ease. A
+hand-built move with more than two keyframes per channel is approximated by
+its endpoints, and the export plan warns when that happens.
+
+Localisation covers the main surfaces (home, tool rail, editor chrome,
+export, settings). Sheet-internal prose is still English; the string table
+in `lib/core/l10n/app_strings.dart` is the single place to extend.
 
 ## Known gaps
 

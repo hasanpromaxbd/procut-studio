@@ -32,6 +32,7 @@ import '../../engine/ffmpeg/hardware_encoder.dart';
 import '../../engine/render/layer_rasteriser.dart';
 import '../../engine/render/shader_library.dart';
 import '../../engine/render/thumbnail_cache.dart';
+import '../services/crash_report_service.dart';
 import '../services/path_service.dart';
 import '../services/permission_service.dart';
 
@@ -40,6 +41,11 @@ import '../services/permission_service.dart';
 /// Filesystem locations. Overridden with an initialised instance at startup.
 final pathServiceProvider = Provider<PathService>(
   (ref) => throw StateError('pathServiceProvider must be overridden in main()'),
+);
+
+final crashReportServiceProvider = Provider<CrashReportService>(
+  (ref) =>
+      throw StateError('crashReportServiceProvider must be overridden in main()'),
 );
 
 /// Hive boxes. Overridden with an opened instance at startup.

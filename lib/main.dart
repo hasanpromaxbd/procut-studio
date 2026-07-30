@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/di/providers.dart';
 import 'core/logging/app_logger.dart';
+import 'core/services/crash_report_service.dart';
 import 'core/services/path_service.dart';
 import 'data/datasources/local/hive_store.dart';
 import 'engine/ffmpeg/ffmpeg_service.dart';
@@ -38,6 +39,12 @@ Future<void> main() async {
   final paths = PathService();
   await paths.init();
 
+  // From here on, uncaught errors survive the process.
+  final crashes = CrashReportService(directory: paths.crashesDir);
+  await crashes.init();
+  onUncaughtError = (error, stack, {required fatal}) =>
+      crashes.record(error: error, stackTrace: stack, fatal: fatal);
+
   final store = HiveStore();
   final opened = await store.init();
   if (opened.isErr) {
@@ -63,6 +70,7 @@ Future<void> main() async {
     ProviderScope(
       overrides: [
         pathServiceProvider.overrideWithValue(paths),
+        crashReportServiceProvider.overrideWithValue(crashes),
         hiveStoreProvider.overrideWithValue(store),
         shaderLibraryProvider.overrideWithValue(shaders),
         ffmpegServiceProvider.overrideWithValue(ffmpeg),

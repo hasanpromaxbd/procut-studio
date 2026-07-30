@@ -16,9 +16,11 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  199 tests, all passing
-flutter build apk --debug    →  built (174 MB, 3 ABIs)
-flutter build apk --release  →  built (110 MB, R8 + shrinker)
+flutter test                 →  243 tests, all passing
+flutter build apk --release  →  built (117 MB, R8 + shrinker)
+tool/verify_shaders.sh       →  PASS (real impellerc)
+tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
+tool/verify_ducking.sh       →  PASS (real ffmpeg, measured 6 dB duck)
 ```
 
 Verified against Flutter 3.44.6 / Dart 3.12.2 / AGP 9.0.1 / Gradle 9.1.
@@ -37,7 +39,13 @@ what is architected with a working seam but needs an external piece. See
 | Crop / rotate / flip / opacity / blend modes | Implemented |
 | Keyframe animation with easing curves | Implemented + tested — animates on export via `sendcmd` |
 | Speed ramping, shape masks, adjustment layers | Implemented + tested |
-| Multi-select, copy/paste, markers, templates | Implemented + tested |
+| Multi-select, copy/paste, markers, templates | Implemented + tested — every command acts on the whole selection |
+| Slip / slide / roll trims, beat-synced auto-cut | Implemented + tested |
+| Ken Burns on stills (preview keyframes, `zoompan` export) | Implemented + tested |
+| Audio ducking (side-chain compression per track) | Implemented + tested against real ffmpeg |
+| Colour scopes, composition guides, video-clip waveforms | Implemented |
+| Keyboard shortcuts, undo history scrubber, export queue | Implemented |
+| Bengali localisation, local-only crash reporting | Implemented + tested |
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |

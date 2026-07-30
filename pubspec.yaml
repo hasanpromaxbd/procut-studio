@@ -45,7 +45,9 @@ dependencies:
   # ── Utils ────────────────────────────────────────────────────────────────
   uuid: ^4.6.0
   collection: ^1.19.1
-  intl: ^0.20.3
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
   archive: ^4.0.9 # .pcstudio project bundles (zip)
 
 dev_dependencies:

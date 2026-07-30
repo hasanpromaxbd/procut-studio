@@ -1,12 +1,16 @@
 /// App settings, storage management and diagnostics.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/di/providers.dart';
+import '../../../core/l10n/app_strings.dart';
 import '../../../core/logging/app_logger.dart';
+import '../../../core/services/crash_report_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/utils/time_utils.dart';
 import '../../../data/datasources/remote/http_ai_backend.dart';
@@ -37,13 +41,15 @@ class SettingsScreen extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final cacheSize = ref.watch(cacheSizeProvider);
     final capabilities = ref.watch(aiCapabilitiesProvider);
+    final strings = ref.watch(stringsProvider);
+    final localeOverride = ref.watch(localeOverrideProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(strings.settings)),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
         children: [
-          const SectionHeader(title: 'Appearance'),
+          SectionHeader(title: strings.appearance),
           SegmentedButton<ThemeMode>(
             segments: const [
               ButtonSegment(value: ThemeMode.light, label: Text('Light')),
@@ -55,7 +61,30 @@ class SettingsScreen extends ConsumerWidget {
                 ref.read(themeModeProvider.notifier).set(selection.first),
           ),
 
-          const SectionHeader(title: 'AI server'),
+          SectionHeader(title: strings.language),
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(value: '', label: Text(strings.languageSystem)),
+              const ButtonSegment(value: 'en', label: Text('English')),
+              const ButtonSegment(value: 'bn', label: Text('বাংলা')),
+            ],
+            selected: {localeOverride?.languageCode ?? ''},
+            onSelectionChanged: (selection) => ref
+                .read(localeOverrideProvider.notifier)
+                .set(
+                  selection.first.isEmpty ? null : Locale(selection.first),
+                ),
+          ),
+          const SizedBox(height: Spacing.xs),
+          Text(
+            'বাংলা অনুবাদ মানুষের লেখা। Editing terms stay in English '
+            'where that is what a Bengali editor actually says.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+
+          SectionHeader(title: strings.aiServer),
           const _AiBackendForm(),
 
           const SectionHeader(title: 'AI features'),
@@ -100,7 +129,7 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
 
-          const SectionHeader(title: 'Storage'),
+          SectionHeader(title: strings.storage),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.cached_rounded),
@@ -132,19 +161,29 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
 
-          const SectionHeader(title: 'Diagnostics'),
+          SectionHeader(title: strings.diagnostics),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.receipt_long_rounded),
-            title: const Text('Recent logs'),
+            title: Text(strings.recentLogs),
             subtitle: const Text('Useful when reporting a failed export'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const _LogScreen()),
             ),
           ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.bug_report_outlined),
+            title: Text(strings.crashReports),
+            subtitle: Text(strings.crashReportsBlurb),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const _CrashScreen()),
+            ),
+          ),
 
-          const SectionHeader(title: 'About'),
+          SectionHeader(title: strings.about),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.info_outline_rounded),
@@ -384,6 +423,153 @@ class _LogScreen extends StatelessWidget {
                         _ => Theme.of(context).colorScheme.onSurfaceVariant,
                       },
                     ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+
+/// Stored crash reports, with one honest share path out.
+class _CrashScreen extends ConsumerStatefulWidget {
+  const _CrashScreen();
+
+  @override
+  ConsumerState<_CrashScreen> createState() => _CrashScreenState();
+}
+
+class _CrashScreenState extends ConsumerState<_CrashScreen> {
+  List<CrashReport>? _reports;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final reports = await ref.read(crashReportServiceProvider).list();
+    if (mounted) setState(() => _reports = reports);
+  }
+
+  Future<void> _export() async {
+    final service = ref.read(crashReportServiceProvider);
+    final paths = ref.read(pathServiceProvider);
+    final file = await service.exportDiagnostics(
+      appVersion: AppConstants.appName,
+      target: paths.diagnosticsFile(),
+    );
+    final result = await ref
+        .read(exportRepositoryProvider)
+        .share(file, subject: 'ProCut Studio diagnostics');
+    if (!mounted) return;
+    result.fold(
+      (_) {},
+      (failure) => ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message))),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final reports = _reports;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Crash reports'),
+        actions: [
+          IconButton(
+            tooltip: 'Share a diagnostics file',
+            icon: const Icon(Icons.ios_share_rounded),
+            onPressed: reports == null ? null : () => unawaited(_export()),
+          ),
+          IconButton(
+            tooltip: 'Delete all',
+            icon: const Icon(Icons.delete_outline_rounded),
+            onPressed: (reports?.isEmpty ?? true)
+                ? null
+                : () async {
+                    await ref.read(crashReportServiceProvider).clear();
+                    await _load();
+                  },
+          ),
+        ],
+      ),
+      body: reports == null
+          ? const Center(child: CircularProgressIndicator())
+          : reports.isEmpty
+          ? Center(
+              child: Text(
+                'No crashes recorded. Good.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(Spacing.md),
+              itemCount: reports.length,
+              itemBuilder: (context, index) {
+                final report = reports[index];
+                return Card(
+                  child: ExpansionTile(
+                    leading: Icon(
+                      report.fatal
+                          ? Icons.error_rounded
+                          : Icons.warning_amber_rounded,
+                      color: report.fatal
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    title: Text(
+                      report.error,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    subtitle: Text(
+                      '${report.at}'.split('.').first,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(Spacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SelectableText(
+                              report.stackTrace,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                              maxLines: 20,
+                            ),
+                            if (report.breadcrumbs.isNotEmpty) ...[
+                              const SizedBox(height: Spacing.sm),
+                              Text(
+                                'What the app was doing:',
+                                style: theme.textTheme.labelSmall,
+                              ),
+                              for (final crumb
+                                  in report.breadcrumbs.take(12))
+                                Text(
+                                  crumb,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontFamily: 'monospace',
+                                    fontSize: 10,
+                                    color:
+                                        theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },

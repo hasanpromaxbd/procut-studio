@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/l10n/app_strings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/utils/time_utils.dart';
@@ -24,6 +25,7 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final strings = ref.watch(stringsProvider);
     final projects = ref.watch(projectListProvider);
     final theme = Theme.of(context);
     final width = MediaQuery.sizeOf(context).width;
@@ -64,7 +66,7 @@ class HomeScreen extends ConsumerWidget {
                         message:
                             'Start a new project and drop in your first clip.',
                         action: GradientButton(
-                          label: 'New project',
+                          label: strings.newProject,
                           icon: Icons.add_rounded,
                           onPressed: () => _createProject(context, ref),
                         ),
@@ -103,7 +105,7 @@ class HomeScreen extends ConsumerWidget {
           : FloatingActionButton.extended(
               onPressed: () => _createProject(context, ref),
               icon: const Icon(Icons.add_rounded),
-              label: const Text('New project'),
+              label: Text(strings.newProject),
               backgroundColor: theme.colorScheme.primary,
               foregroundColor: Colors.white,
             ),
@@ -144,6 +146,7 @@ class HomeScreen extends ConsumerWidget {
   ) async {
     final controller = ref.read(homeControllerProvider.notifier);
     final messenger = ScaffoldMessenger.of(context);
+    final strings = ref.read(stringsProvider);
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -154,12 +157,12 @@ class HomeScreen extends ConsumerWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline_rounded),
-              title: const Text('Rename'),
+              title: Text(strings.rename),
               onTap: () => Navigator.pop(context, 'rename'),
             ),
             ListTile(
               leading: const Icon(Icons.copy_all_rounded),
-              title: const Text('Duplicate'),
+              title: Text(strings.duplicateAction),
               onTap: () => Navigator.pop(context, 'duplicate'),
             ),
             ListTile(
@@ -174,7 +177,7 @@ class HomeScreen extends ConsumerWidget {
                 color: Theme.of(context).colorScheme.error,
               ),
               title: Text(
-                'Delete',
+                strings.delete,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
               onTap: () => Navigator.pop(context, 'delete'),
@@ -210,21 +213,18 @@ class HomeScreen extends ConsumerWidget {
           context: context,
           builder: (context) => AlertDialog(
             title: Text('Delete "${summary.name}"?'),
-            content: const Text(
-              'The project and its edit history are removed. '
-              'Media files you imported stay on your device.',
-            ),
+            content: Text(strings.deleteProjectWarning),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
+                child: Text(strings.cancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(context, true),
                 style: FilledButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.error,
                 ),
-                child: const Text('Delete'),
+                child: Text(strings.delete),
               ),
             ],
           ),
@@ -268,6 +268,7 @@ class _Header extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final sort = ref.watch(projectSortProvider);
+    final strings = ref.watch(stringsProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -294,7 +295,7 @@ class _Header extends ConsumerWidget {
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.dashboard_customize_outlined),
-                tooltip: 'Templates',
+                tooltip: strings.templates,
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const TemplatesScreen(),

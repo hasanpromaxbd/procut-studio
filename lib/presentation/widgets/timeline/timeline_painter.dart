@@ -252,8 +252,15 @@ class TimelinePainter extends CustomPainter {
     );
 
     switch (clip) {
-      case VideoClip() || ImageClip():
-        _paintThumbnails(canvas, rect, clip as MediaClip);
+      case VideoClip():
+        _paintThumbnails(canvas, rect, clip);
+        // The embedded audio, as a strip along the bottom of the same clip —
+        // reading the dialogue without expanding it onto an audio track.
+        if (!clip.muted && !clip.isFrozen) {
+          _paintWaveform(canvas, rect, clip, accent, strip: true);
+        }
+      case ImageClip():
+        _paintThumbnails(canvas, rect, clip);
       case AudioClip():
         _paintWaveform(canvas, rect, clip, accent);
       case TextClip() || StickerClip():
@@ -366,17 +373,25 @@ class TimelinePainter extends CustomPainter {
     return Rect.fromLTWH(0, (source.height - h) / 2, source.width, h);
   }
 
-  void _paintWaveform(Canvas canvas, Rect rect, AudioClip clip, Color accent) {
+  void _paintWaveform(
+    Canvas canvas,
+    Rect rect,
+    MediaClip clip,
+    Color accent, {
+    bool strip = false,
+  }) {
     final peaks = waveforms[clip.assetId];
     if (peaks == null || peaks.isEmpty) return;
 
     final paint = Paint()
-      ..color = AppColors.waveform.withValues(alpha: 0.85)
+      ..color = AppColors.waveform.withValues(alpha: strip ? 0.6 : 0.85)
       ..strokeWidth = 1.2
       ..strokeCap = StrokeCap.round;
 
-    final centreY = rect.center.dy;
-    final halfHeight = rect.height * 0.42;
+    // On a video clip the waveform shares the row with thumbnails, so it
+    // hugs the bottom quarter instead of the middle.
+    final centreY = strip ? rect.bottom - rect.height * 0.14 : rect.center.dy;
+    final halfHeight = rect.height * (strip ? 0.13 : 0.42);
 
     // One line per horizontal pixel; sampling the peak array by position keeps
     // this O(visible width) regardless of clip length.

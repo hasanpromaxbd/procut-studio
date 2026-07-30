@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/providers.dart';
 import '../../../core/error/failure.dart';
+import '../../../core/l10n/app_strings.dart';
 import '../../../core/services/permission_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
@@ -26,17 +27,21 @@ import '../../viewmodels/editor_state.dart';
 import '../../viewmodels/playhead_controller.dart';
 import '../../viewmodels/timeline_view_controller.dart';
 import '../../widgets/common/glass_panel.dart';
+import '../../widgets/editor/guides_overlay.dart';
 import '../../widgets/editor/preview_stage.dart';
 import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
 import '../home/templates_screen.dart';
+import 'editor_shortcuts.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
+import 'sheets/history_sheet.dart';
 import 'sheets/mask_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
 import 'sheets/record_sheet.dart';
 import 'sheets/rhythm_sheet.dart';
+import 'sheets/scopes_sheet.dart';
 import 'sheets/speed_sheet.dart';
 import 'sheets/text_sheet.dart';
 import 'sheets/transition_sheet.dart';
@@ -78,9 +83,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       unawaited(
-        ref
-            .read(editorControllerProvider(widget.projectId).notifier)
-            .flush(),
+        ref.read(editorControllerProvider(widget.projectId).notifier).flush(),
       );
     }
   }
@@ -101,20 +104,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     // listener so it cannot get out of sync after a hot reload.
     _syncClock(playhead, editor);
 
-    ref.listen<EditorState?>(
-      editorControllerProvider(widget.projectId),
-      (previous, next) {
-        final message = next?.errorMessage;
-        if (message != null && message != previous?.errorMessage) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(content: Text(message)));
-          ref
-              .read(editorControllerProvider(widget.projectId).notifier)
-              .clearMessages();
-        }
-      },
-    );
+    ref.listen<EditorState?>(editorControllerProvider(widget.projectId), (
+      previous,
+      next,
+    ) {
+      final message = next?.errorMessage;
+      if (message != null && message != previous?.errorMessage) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
+        ref
+            .read(editorControllerProvider(widget.projectId).notifier)
+            .clearMessages();
+      }
+    });
 
     if (editor == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -131,42 +134,45 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
             .flush();
         if (context.mounted) Navigator.of(context).pop();
       },
-      child: Scaffold(
-        appBar: _buildAppBar(editor),
-        body: Column(
-          children: [
-            Expanded(
-              flex: isTablet ? 6 : 5,
-              child: isTablet
-                  ? Row(
-                      children: [
-                        Expanded(
-                          child: PreviewStage(projectId: widget.projectId),
-                        ),
-                        SizedBox(
-                          width: 76,
-                          child: _ToolRail(
-                            projectId: widget.projectId,
-                            vertical: true,
-                            onAction: _handleToolAction,
+      child: EditorShortcutsScope(
+        projectId: widget.projectId,
+        child: Scaffold(
+          appBar: _buildAppBar(editor),
+          body: Column(
+            children: [
+              Expanded(
+                flex: isTablet ? 6 : 5,
+                child: isTablet
+                    ? Row(
+                        children: [
+                          Expanded(
+                            child: PreviewStage(projectId: widget.projectId),
                           ),
-                        ),
-                      ],
-                    )
-                  : PreviewStage(projectId: widget.projectId),
-            ),
-            _TransportBar(projectId: widget.projectId),
-            Expanded(
-              flex: isTablet ? 5 : 4,
-              child: TimelineWidget(projectId: widget.projectId),
-            ),
-            if (!isTablet)
-              _ToolRail(
-                projectId: widget.projectId,
-                vertical: false,
-                onAction: _handleToolAction,
+                          SizedBox(
+                            width: 76,
+                            child: _ToolRail(
+                              projectId: widget.projectId,
+                              vertical: true,
+                              onAction: _handleToolAction,
+                            ),
+                          ),
+                        ],
+                      )
+                    : PreviewStage(projectId: widget.projectId),
               ),
-          ],
+              _TransportBar(projectId: widget.projectId),
+              Expanded(
+                flex: isTablet ? 5 : 4,
+                child: TimelineWidget(projectId: widget.projectId),
+              ),
+              if (!isTablet)
+                _ToolRail(
+                  projectId: widget.projectId,
+                  vertical: false,
+                  onAction: _handleToolAction,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -197,6 +203,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     final controller = ref.read(
       editorControllerProvider(widget.projectId).notifier,
     );
+    final strings = ref.watch(stringsProvider);
     return AppBar(
       leading: IconButton(
         icon: const Icon(Icons.arrow_back_rounded),
@@ -230,25 +237,71 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         IconButton(
           icon: const Icon(Icons.undo_rounded),
           tooltip: editor.undoLabel == null
-              ? 'Undo'
-              : 'Undo ${editor.undoLabel}',
+              ? strings.undo
+              : '${strings.undo} ${editor.undoLabel}',
           onPressed: editor.canUndo ? controller.undo : null,
         ),
         IconButton(
           icon: const Icon(Icons.redo_rounded),
           tooltip: editor.redoLabel == null
-              ? 'Redo'
-              : 'Redo ${editor.redoLabel}',
+              ? strings.redo
+              : '${strings.redo} ${editor.redoLabel}',
           onPressed: editor.canRedo ? controller.redo : null,
         ),
         IconButton(
+          icon: const Icon(Icons.history_rounded),
+          tooltip: strings.history,
+          onPressed: (editor.canUndo || editor.canRedo)
+              ? () => unawaited(
+                  ToolSheet.show<void>(
+                    context,
+                    sheet: HistorySheet(projectId: widget.projectId),
+                  ),
+                )
+              : null,
+        ),
+        Consumer(
+          builder: (context, ref, _) {
+            final guides = ref.watch(guidesProvider);
+            return MenuAnchor(
+              builder: (context, menu, _) => IconButton(
+                icon: Icon(
+                  guides.anyOn ? Icons.grid_on_rounded : Icons.grid_off_rounded,
+                ),
+                tooltip: strings.compositionGuides,
+                isSelected: guides.anyOn,
+                onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+              ),
+              menuChildren: [
+                for (final kind in GuideKind.values)
+                  CheckboxMenuButton(
+                    value: guides.isOn(kind),
+                    onChanged: (_) =>
+                        ref.read(guidesProvider.notifier).toggle(kind),
+                    child: Text(kind.label),
+                  ),
+              ],
+            );
+          },
+        ),
+        IconButton(
+          icon: const Icon(Icons.area_chart_rounded),
+          tooltip: strings.scopes,
+          onPressed: () => unawaited(
+            ToolSheet.show<void>(
+              context,
+              sheet: ScopesSheet(projectId: widget.projectId),
+            ),
+          ),
+        ),
+        IconButton(
           icon: const Icon(Icons.aspect_ratio_rounded),
-          tooltip: 'Reframe for another aspect',
+          tooltip: strings.reframe,
           onPressed: _reframe,
         ),
         IconButton(
           icon: const Icon(Icons.dashboard_customize_outlined),
-          tooltip: 'Save as template',
+          tooltip: strings.saveAsTemplate,
           onPressed: () =>
               showSaveTemplateSheet(context, ref, widget.projectId),
         ),
@@ -259,12 +312,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 ? null
                 : () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) =>
-                          ExportScreen(projectId: widget.projectId),
+                      builder: (_) => ExportScreen(projectId: widget.projectId),
                     ),
                   ),
             icon: const Icon(Icons.ios_share_rounded, size: 18),
-            label: const Text('Export'),
+            label: Text(strings.export),
             style: FilledButton.styleFrom(
               minimumSize: const Size(0, 38),
               padding: const EdgeInsets.symmetric(horizontal: Spacing.md),
@@ -316,20 +368,21 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   }
 
   Future<void> _renameProject(String current) async {
+    final strings = ref.read(stringsProvider);
     final controller = TextEditingController(text: current);
     final name = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Project name'),
+        title: Text(strings.projectName),
         content: TextField(controller: controller, autofocus: true),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(strings.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Save'),
+            child: Text(strings.save),
           ),
         ],
       ),
@@ -474,15 +527,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   TrackType.adjustment,
                 ])
                   ListTile(
-                    leading: Icon(
-                      switch (option) {
-                        TrackType.adjustment => Icons.tune_rounded,
-                        TrackType.audio => Icons.graphic_eq_rounded,
-                        TrackType.text => Icons.title_rounded,
-                        _ => Icons.layers_rounded,
-                      },
-                      color: Color(option.colorValue),
-                    ),
+                    leading: Icon(switch (option) {
+                      TrackType.adjustment => Icons.tune_rounded,
+                      TrackType.audio => Icons.graphic_eq_rounded,
+                      TrackType.text => Icons.title_rounded,
+                      _ => Icons.layers_rounded,
+                    }, color: Color(option.colorValue)),
                     title: Text('${option.label} track'),
                     subtitle: option == TrackType.adjustment
                         ? const Text(
@@ -634,7 +684,8 @@ class _TransportBar extends ConsumerWidget {
                         text: TimeUtils.formatSmpte(playhead.position, fps),
                       ),
                       TextSpan(
-                        text: '  /  ${TimeUtils.formatShort(playhead.duration)}',
+                        text:
+                            '  /  ${TimeUtils.formatShort(playhead.duration)}',
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
@@ -716,134 +767,135 @@ class _ToolRail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final editor = ref.watch(editorControllerProvider(projectId));
     final hasSelection = editor?.hasSelection ?? false;
+    final strings = ref.watch(stringsProvider);
 
     final buttons = <Widget>[
       ToolIconButton(
         icon: Icons.add_photo_alternate_outlined,
-        label: 'Media',
+        label: strings.toolMedia,
         onPressed: () => onAction(_ToolAction.addMedia),
       ),
       ToolIconButton(
         icon: Icons.content_cut_rounded,
-        label: 'Split',
+        label: strings.toolSplit,
         onPressed: () => onAction(_ToolAction.split),
       ),
       ToolIconButton(
         icon: Icons.speed_rounded,
-        label: 'Speed',
+        label: strings.toolSpeed,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.speed),
       ),
       ToolIconButton(
         icon: Icons.auto_fix_high_rounded,
-        label: 'Effects',
+        label: strings.toolEffects,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.effects),
       ),
       ToolIconButton(
         icon: Icons.compare_arrows_rounded,
-        label: 'Transition',
+        label: strings.toolTransition,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.transition),
       ),
       ToolIconButton(
         icon: Icons.title_rounded,
-        label: 'Text',
+        label: strings.toolText,
         onPressed: () => onAction(_ToolAction.text),
       ),
       ToolIconButton(
         icon: Icons.mic_rounded,
-        label: 'Record',
+        label: strings.toolRecord,
         onPressed: () => onAction(_ToolAction.record),
       ),
       ToolIconButton(
         icon: Icons.auto_awesome_rounded,
-        label: 'AI',
+        label: strings.toolAi,
         onPressed: () => onAction(_ToolAction.ai),
       ),
       ToolIconButton(
         icon: Icons.crop_free_rounded,
-        label: 'Mask',
+        label: strings.toolMask,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.mask),
       ),
       ToolIconButton(
         icon: Icons.flag_rounded,
-        label: 'Marker',
+        label: strings.toolMarker,
         onPressed: () => onAction(_ToolAction.marker),
       ),
       ToolIconButton(
         icon: Icons.copy_all_rounded,
-        label: 'Copy',
+        label: strings.toolCopy,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.copy),
       ),
       ToolIconButton(
         icon: Icons.content_paste_rounded,
-        label: 'Paste',
+        label: strings.toolPaste,
         enabled: editor?.canPaste ?? false,
         onPressed: () => onAction(_ToolAction.paste),
       ),
       ToolIconButton(
         icon: Icons.rotate_90_degrees_cw_rounded,
-        label: 'Rotate',
+        label: strings.toolRotate,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.rotate),
       ),
       ToolIconButton(
         icon: Icons.flip_rounded,
-        label: 'Flip',
+        label: strings.toolFlip,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.flip),
       ),
       ToolIconButton(
         icon: Icons.ac_unit_rounded,
-        label: 'Freeze',
+        label: strings.toolFreeze,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.freeze),
       ),
       ToolIconButton(
         icon: Icons.fast_rewind_rounded,
-        label: 'Reverse',
+        label: strings.toolReverse,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.reverse),
       ),
       ToolIconButton(
         icon: Icons.swap_horiz_rounded,
-        label: 'Trim',
+        label: strings.toolTrim,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.trim),
       ),
       ToolIconButton(
         icon: Icons.videocam_rounded,
-        label: 'Motion',
+        label: strings.toolMotion,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.motion),
       ),
       ToolIconButton(
         icon: Icons.graphic_eq_rounded,
-        label: 'Beats',
+        label: strings.toolBeats,
         onPressed: () => onAction(_ToolAction.rhythm),
       ),
       ToolIconButton(
         icon: Icons.tune_rounded,
-        label: 'Mixer',
+        label: strings.toolMixer,
         onPressed: () => onAction(_ToolAction.mixer),
       ),
       ToolIconButton(
         icon: Icons.copy_rounded,
-        label: 'Duplicate',
+        label: strings.toolDuplicate,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.duplicate),
       ),
       ToolIconButton(
         icon: Icons.layers_rounded,
-        label: 'Track',
+        label: strings.toolTrack,
         onPressed: () => onAction(_ToolAction.addTrack),
       ),
       ToolIconButton(
         icon: Icons.delete_outline_rounded,
-        label: 'Delete',
+        label: strings.toolDelete,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.delete),
       ),

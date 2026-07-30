@@ -30,6 +30,7 @@ import '../../core/utils/time_utils.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/export_settings.dart';
+import '../../domain/entities/keyframe.dart';
 import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/project.dart';
 import '../../domain/entities/text_style_spec.dart';
@@ -541,7 +542,22 @@ class TimelineCompiler {
 
         final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
         chain.then(Filters.fps(fps));
-        _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
+
+        // A still with animated scale/position is a camera move (Ken Burns),
+        // and `zoompan` is the filter built for exactly that. The static
+        // geometry path reads `.staticValue` and would freeze the move.
+        if (_hasCameraMove(clip.transform)) {
+          _appendCameraMove(
+            chain,
+            clip,
+            fps: fps,
+            outWidth: outWidth,
+            outHeight: outHeight,
+            warnings: warnings,
+          );
+        } else {
+          _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
+        }
         _collectAutomation(
           _appendEffects(chain, clip, workspaceDir),
           commandScripts,
@@ -719,6 +735,82 @@ class TimelineCompiler {
         RenderPlan.quoteArg(output),
       ].join(' '),
     );
+  }
+
+  static bool _hasCameraMove(Transform2D transform) =>
+      transform.scaleX.isAnimated ||
+      transform.scaleY.isAnimated ||
+      transform.x.isAnimated ||
+      transform.y.isAnimated;
+
+  /// Renders an animated still through `zoompan`.
+  ///
+  /// The frame is first fitted onto a canvas at 2× output size — zoompan
+  /// samples its crop window from the input, and a window cut from a
+  /// same-size frame goes visibly soft by 1.2×. The window then travels
+  /// between the transform's endpoint values on a smoothstep ramp, which is
+  /// the preview's easeInOut to within a hair.
+  ///
+  /// Endpoints only: a hand-built multi-keyframe move on a still is
+  /// approximated by its first and last values, and says so, rather than
+  /// silently freezing the way the static path did.
+  void _appendCameraMove(
+    FilterChain chain,
+    ImageClip clip, {
+    required int fps,
+    required int outWidth,
+    required int outHeight,
+    required List<String> warnings,
+  }) {
+    final transform = clip.transform;
+    final frames = MathUtils.clampInt(
+      (clip.duration.inMicroseconds * fps / 1e6).round(),
+      2,
+      fps * 600,
+    );
+
+    if ([transform.scaleX, transform.x, transform.y]
+        .any((c) => c.keyframes.length > 2)) {
+      warnings.add(
+        'A still\u2019s camera move has more than two keyframes; the export '
+        'plays it as one move between the first and last.',
+      );
+    }
+
+    double at(AnimatableDouble channel, Duration time) => channel.valueAt(time);
+    final end = clip.duration;
+
+    final zoomFrom = at(transform.scaleX, Duration.zero).clamp(1.0, 10.0);
+    final zoomTo = at(transform.scaleX, end).clamp(1.0, 10.0);
+    final xFrom = at(transform.x, Duration.zero);
+    final xTo = at(transform.x, end);
+    final yFrom = at(transform.y, Duration.zero);
+    final yTo = at(transform.y, end);
+
+    // Progress over output frames, eased. `on` counts output frames, so this
+    // is exact regardless of the input's own timing.
+    final progress =
+        'st(0,min(on/${frames - 1},1))*0+ld(0)*ld(0)*(3-2*ld(0))';
+
+    String ramp(double from, double to) => (to - from).abs() < 1e-9
+        ? FilterGraph.formatDouble(from)
+        : '${FilterGraph.formatDouble(from)}+'
+              '(${FilterGraph.formatDouble(to - from)})*($progress)';
+
+    // Oversampled fit, then the moving window. A positive transform.x moves
+    // the image right, which moves the crop window left — hence the minus.
+    chain
+      ..thenAll(Filters.scaleToFit(outWidth * 2, outHeight * 2))
+      ..then(
+        Filter('zoompan', {
+          'z': ramp(zoomFrom, zoomTo),
+          'x': 'iw/2-(iw/zoom/2)-(${ramp(xFrom, xTo)})*iw',
+          'y': 'ih/2-(ih/zoom/2)-(${ramp(yFrom, yTo)})*ih',
+          'd': 1,
+          's': '${outWidth}x$outHeight',
+          'fps': fps,
+        }),
+      );
   }
 
   /// Crop → flip → rotate → fit into the canvas. Order matters: cropping after

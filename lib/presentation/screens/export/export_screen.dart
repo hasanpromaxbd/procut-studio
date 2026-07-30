@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/providers.dart';
+import '../../../core/l10n/app_strings.dart';
 import '../../../core/services/permission_service.dart';
 import '../../../core/theme/app_dimens.dart';
 import '../../../core/theme/app_theme.dart';
@@ -14,6 +15,7 @@ import '../../../domain/entities/export_preset.dart';
 import '../../../domain/entities/export_settings.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/export_controller.dart';
+import '../../viewmodels/export_queue_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 
 class ExportScreen extends ConsumerStatefulWidget {
@@ -42,6 +44,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     final editor = ref.watch(editorControllerProvider(widget.projectId));
     final settings = ref.watch(exportSettingsProvider);
     final progress = ref.watch(exportControllerProvider);
+    final strings = ref.watch(stringsProvider);
 
     if (editor == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -49,7 +52,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Export'),
+        title: Text(strings.export),
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
           onPressed: () => Navigator.of(context).maybePop(),
@@ -63,24 +66,61 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(Spacing.lg),
-                child: GradientButton(
-                  label: 'Start export',
-                  icon: Icons.movie_filter_rounded,
-                  expand: true,
-                  onPressed: settings.validate().isEmpty
-                      ? () async {
-                          // Asked for, but never required: without it the
-                          // export still runs, it just cannot show progress in
-                          // the shade. Blocking the render over a notification
-                          // would be absurd.
-                          await ref
-                              .read(permissionServiceProvider)
-                              .request(MediaPermissionKind.notifications);
-                          await ref
-                              .read(exportControllerProvider.notifier)
-                              .start(editor.project, settings);
-                        }
-                      : null,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const _QueueSummary(),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GradientButton(
+                            label: strings.startExport,
+                            icon: Icons.movie_filter_rounded,
+                            expand: true,
+                            onPressed: settings.validate().isEmpty
+                                ? () async {
+                                    // Asked for, but never required: without
+                                    // it the export still runs, it just cannot
+                                    // show progress in the shade. Blocking the
+                                    // render over a notification would be
+                                    // absurd.
+                                    await ref
+                                        .read(permissionServiceProvider)
+                                        .request(
+                                          MediaPermissionKind.notifications,
+                                        );
+                                    await ref
+                                        .read(exportControllerProvider.notifier)
+                                        .start(editor.project, settings);
+                                  }
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: Spacing.sm),
+                        // Queue instead of start: line up several settings and
+                        // let them run back to back.
+                        IconButton.filledTonal(
+                          tooltip: strings.addToQueue,
+                          icon: const Icon(Icons.playlist_add_rounded),
+                          onPressed: settings.validate().isEmpty
+                              ? () {
+                                  ref
+                                      .read(exportQueueProvider.notifier)
+                                      .enqueue(editor.project, settings);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Queued — change the settings and '
+                                        'queue another, or leave it to run.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -528,6 +568,174 @@ class _Row extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// One line above the buttons: what the queue is doing, with a way in.
+class _QueueSummary extends ConsumerWidget {
+  const _QueueSummary();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queue = ref.watch(exportQueueProvider);
+    if (queue.jobs.isEmpty) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final running = queue.jobs
+        .where((j) => j.status == QueuedExportStatus.running)
+        .firstOrNull;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Spacing.sm),
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(Radii.sm)),
+        onTap: () => _showQueue(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Spacing.sm,
+            vertical: Spacing.xs,
+          ),
+          child: Row(
+            children: [
+              if (running != null)
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: running.progress <= 0 ? null : running.progress,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.playlist_play_rounded,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  running != null
+                      ? 'Exporting ${running.label} — '
+                            '${queue.remaining} in the queue'
+                      : '${queue.jobs.length} job(s) in the queue',
+                  style: theme.textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, size: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showQueue(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => const _QueueSheet(),
+    );
+  }
+}
+
+class _QueueSheet extends ConsumerWidget {
+  const _QueueSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queue = ref.watch(exportQueueProvider);
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(
+          Spacing.lg,
+          0,
+          Spacing.lg,
+          Spacing.lg,
+        ),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  ref.watch(stringsProvider).exportQueue,
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              TextButton(
+                onPressed: queue.jobs.any((j) => j.isFinished)
+                    ? ref.read(exportQueueProvider.notifier).clearFinished
+                    : null,
+                child: Text(ref.watch(stringsProvider).clearFinished),
+              ),
+            ],
+          ),
+          for (final job in queue.jobs)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: switch (job.status) {
+                QueuedExportStatus.waiting =>
+                  const Icon(Icons.schedule_rounded),
+                QueuedExportStatus.running => SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    value: job.progress <= 0 ? null : job.progress,
+                  ),
+                ),
+                QueuedExportStatus.done => Icon(
+                  Icons.check_circle_rounded,
+                  color: theme.colorScheme.primary,
+                ),
+                QueuedExportStatus.failed => Icon(
+                  Icons.error_rounded,
+                  color: theme.colorScheme.error,
+                ),
+                QueuedExportStatus.cancelled =>
+                  const Icon(Icons.cancel_outlined),
+              },
+              title: Text(job.label),
+              subtitle: job.errorMessage != null
+                  ? Text(
+                      job.errorMessage!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    )
+                  : job.outputPath != null
+                  ? Text(
+                      job.outputPath!,
+                      style: theme.textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : null,
+              trailing: switch (job.status) {
+                QueuedExportStatus.waiting => IconButton(
+                  tooltip: 'Remove',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () =>
+                      ref.read(exportQueueProvider.notifier).remove(job.id),
+                ),
+                QueuedExportStatus.running => IconButton(
+                  tooltip: 'Cancel',
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  onPressed: () => ref
+                      .read(exportQueueProvider.notifier)
+                      .cancelRunning(),
+                ),
+                _ => null,
+              },
+            ),
         ],
       ),
     );
