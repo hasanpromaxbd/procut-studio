@@ -18,6 +18,7 @@ import '../../core/utils/time_utils.dart';
 import '../entities/clip.dart';
 import '../entities/effect.dart';
 import '../entities/keyframe.dart';
+import '../entities/layer_frame.dart';
 import '../entities/marker.dart';
 import '../entities/mask.dart';
 import '../entities/timeline.dart';
@@ -1853,6 +1854,64 @@ abstract final class TimelineOperations {
     return Result.ok(next);
   }
 
+  // ── Layout ───────────────────────────────────────────────────────────
+
+  /// Sets a clip's rounded-corner / border dressing.
+  static Result<Timeline> setFrame(
+    Timeline timeline,
+    String clipId,
+    LayerFrame frame,
+  ) => _mapClip(timeline, clipId, (clip) => clip.copyWithBase(frame: frame));
+
+  /// Positions [clipIds] into a named arrangement.
+  ///
+  /// Order matters and is the selection's timeline order, so "the first clip
+  /// goes top-left" is predictable rather than dependent on set iteration.
+  /// Clips beyond the layout's cell count keep their current position — the
+  /// alternative, stacking them all in the last cell, only looks like a bug.
+  static Result<Timeline> applyLayout(
+    Timeline timeline,
+    List<String> clipIds,
+    SplitLayout layout,
+  ) {
+    if (clipIds.isEmpty) {
+      return const Result.err(InvalidEditFailure('Select some clips first.'));
+    }
+
+    final cells = layout.cells;
+    var next = timeline;
+    var placed = 0;
+
+    for (var i = 0; i < clipIds.length && i < cells.length; i++) {
+      final cell = cells[i];
+      final found = next.findClip(clipIds[i]);
+      if (found == null || found.$2.locked) continue;
+
+      final clip = found.$2;
+      final result = _mapClip(
+        next,
+        clipIds[i],
+        (c) => c.copyWithBase(
+          transform: clip.transform.copyWith(
+            scaleX: AnimatableDouble(cell.scale),
+            scaleY: AnimatableDouble(cell.scale),
+            x: AnimatableDouble(cell.x),
+            y: AnimatableDouble(cell.y),
+          ),
+        ),
+      );
+      next = result.getOrElse(next);
+      placed++;
+    }
+
+    if (placed == 0) {
+      return const Result.err(
+        InvalidEditFailure('Nothing here could be arranged.'),
+      );
+    }
+    return Result.ok(next);
+  }
+
   // ── Ken Burns ────────────────────────────────────────────────────────
 
   /// Animates a slow push and drift across a still, as keyframes.
@@ -2000,4 +2059,52 @@ enum TransformChannel {
 
   const TransformChannel(this.label);
   final String label;
+}
+
+
+/// Where each layer sits in a split-screen arrangement.
+///
+/// Cells are expressed the way the transform is — a scale plus a centre
+/// offset in canvas fractions — so a layout is just a batch of ordinary
+/// transforms. Nothing about a laid-out clip is special afterwards: it can be
+/// nudged, animated or re-laid-out like any other.
+enum SplitLayout {
+  sideBySide('Side by side', [
+    LayoutCell(scale: 0.5, x: -0.25, y: 0),
+    LayoutCell(scale: 0.5, x: 0.25, y: 0),
+  ]),
+  stacked('Stacked', [
+    LayoutCell(scale: 0.5, x: 0, y: -0.25),
+    LayoutCell(scale: 0.5, x: 0, y: 0.25),
+  ]),
+  threeUp('Three up', [
+    LayoutCell(scale: 1 / 3, x: 0, y: -1 / 3),
+    LayoutCell(scale: 1 / 3, x: 0, y: 0),
+    LayoutCell(scale: 1 / 3, x: 0, y: 1 / 3),
+  ]),
+  grid('Grid of four', [
+    LayoutCell(scale: 0.5, x: -0.25, y: -0.25),
+    LayoutCell(scale: 0.5, x: 0.25, y: -0.25),
+    LayoutCell(scale: 0.5, x: -0.25, y: 0.25),
+    LayoutCell(scale: 0.5, x: 0.25, y: 0.25),
+  ]),
+  pictureInPicture('Picture in picture', [
+    LayoutCell(scale: 1, x: 0, y: 0),
+    LayoutCell(scale: 0.32, x: 0.3, y: -0.32),
+  ]);
+
+  const SplitLayout(this.label, this.cells);
+
+  final String label;
+  final List<LayoutCell> cells;
+
+  int get capacity => cells.length;
+}
+
+class LayoutCell {
+  const LayoutCell({required this.scale, required this.x, required this.y});
+
+  final double scale;
+  final double x;
+  final double y;
 }

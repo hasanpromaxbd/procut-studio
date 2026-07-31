@@ -58,6 +58,7 @@ final List<(String, String Function(AppStrings))> _accessors = [
   ('toolDuplicate', (s) => s.toolDuplicate),
   ('toolJumpCut', (s) => s.toolJumpCut),
   ('toolGroup', (s) => s.toolGroup),
+  ('toolLayout', (s) => s.toolLayout),
   ('startExport', (s) => s.startExport),
   ('addToQueue', (s) => s.addToQueue),
   ('exportQueue', (s) => s.exportQueue),

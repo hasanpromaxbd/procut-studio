@@ -326,7 +326,7 @@ void main() {
       expect(plan.filterGraph, contains('loop='));
     });
 
-    test('crop and flip appear before the fit-to-canvas scale', () {
+    test('crop and flip appear before the placement scale', () {
       final plan = _compile(
         _project([
           Track(
@@ -352,10 +352,15 @@ void main() {
       final graph = plan.filterGraph;
       expect(graph, contains('crop='));
       expect(graph, contains('hflip'));
+      // The placement scale is the last geometry step; cropping after it
+      // would cut the wrong region of the source.
+      final placement = RegExp(r'scale=w=\d+:h=\d+:flags=bicubic')
+          .firstMatch(graph);
+      expect(placement, isNotNull, reason: 'a layer must be scaled to place it');
       expect(
         graph.indexOf('crop='),
-        lessThan(graph.indexOf('force_original_aspect_ratio')),
-        reason: 'cropping after a fit would cut the wrong region',
+        lessThan(placement!.start),
+        reason: 'cropping after the placement scale would cut the wrong region',
       );
     });
 

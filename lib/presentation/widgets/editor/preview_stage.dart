@@ -24,6 +24,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -230,6 +231,7 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     }
 
     content = _applyEffects(content, clip, local);
+    content = _applyFrame(content, clip, canvasSize, transform);
 
     return Opacity(
       opacity: transform.opacity.clamp(0.0, 1.0),
@@ -254,6 +256,48 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
           ),
         child: content,
       ),
+    );
+  }
+
+  /// Rounded corners and border, matching `FrameCompiler`'s export.
+  ///
+  /// The radius is a fraction of the layer's short edge, and the layer's size
+  /// on screen is the fitted size times the transform scale — so the same
+  /// fraction produces the same visible rounding here and in the render.
+  Widget _applyFrame(
+    Widget child,
+    Clip clip,
+    Size canvasSize,
+    ResolvedTransform transform,
+  ) {
+    final frame = clip.frame;
+    if (!frame.isActive) return child;
+
+    final shortEdge = math.min(
+      canvasSize.width * transform.scaleX.abs(),
+      canvasSize.height * transform.scaleY.abs(),
+    );
+    // Undo the transform's scale: this widget sits *inside* the Transform, so
+    // a radius in on-screen pixels has to be divided back out to land right.
+    final scale = transform.scaleX.abs() < 1e-6 ? 1.0 : transform.scaleX.abs();
+    final radius = frame.radiusPx(shortEdge) / scale;
+    final border = frame.borderPx(shortEdge) / scale;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: frame.hasBorder
+          ? DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(radius),
+                border: Border.all(
+                  color: Color(frame.borderColor),
+                  width: border,
+                ),
+              ),
+              child: child,
+            )
+          : child,
     );
   }
 

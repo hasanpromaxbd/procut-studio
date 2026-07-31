@@ -22,6 +22,8 @@
 /// exactly rather than approximately).
 library;
 
+import 'dart:math' as math;
+
 import 'package:path/path.dart' as p;
 
 import '../../core/logging/app_logger.dart';
@@ -31,6 +33,7 @@ import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/keyframe.dart';
+import '../../domain/entities/layer_frame.dart';
 import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/project.dart';
 import '../../domain/entities/text_style_spec.dart';
@@ -40,6 +43,7 @@ import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
 import '../../domain/entities/voice_effect.dart';
 import '../effects/effect_catalog.dart';
+import '../effects/frame_compiler.dart';
 import '../effects/mask_compiler.dart';
 import '../ffmpeg/filter_graph.dart';
 import '../ffmpeg/hardware_encoder.dart';
@@ -550,7 +554,27 @@ class TimelineCompiler {
         }
 
         chain.then(Filters.fps(fps));
-        _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
+        // Same decision as for stills: an animated transform on video is a
+        // digital pan/zoom and has to render, not freeze at frame one.
+        if (_hasCameraMove(clip.transform)) {
+          _appendCameraMove(
+            chain,
+            clip,
+            fps: fps,
+            outWidth: outWidth,
+            outHeight: outHeight,
+            warnings: warnings,
+          );
+        } else {
+          _appendGeometry(
+            chain,
+            clip.transform,
+            asset,
+            outWidth,
+            outHeight,
+            frame: clip.frame,
+          );
+        }
         _collectAutomation(
           _appendEffects(chain, clip, workspaceDir),
           commandScripts,
@@ -589,9 +613,9 @@ class TimelineCompiler {
         final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
         chain.then(Filters.fps(fps));
 
-        // A still with animated scale/position is a camera move (Ken Burns),
-        // and `zoompan` is the filter built for exactly that. The static
-        // geometry path reads `.staticValue` and would freeze the move.
+        // Animated scale/position is a camera move (Ken Burns on a still,
+        // a digital push on video). `zoompan` is the filter built for it;
+        // the static geometry path reads `.staticValue` and would freeze it.
         if (_hasCameraMove(clip.transform)) {
           _appendCameraMove(
             chain,
@@ -602,7 +626,14 @@ class TimelineCompiler {
             warnings: warnings,
           );
         } else {
-          _appendGeometry(chain, clip.transform, asset, outWidth, outHeight);
+          _appendGeometry(
+            chain,
+            clip.transform,
+            asset,
+            outWidth,
+            outHeight,
+            frame: clip.frame,
+          );
         }
         _collectAutomation(
           _appendEffects(chain, clip, workspaceDir),
@@ -879,9 +910,16 @@ class TimelineCompiler {
   /// Endpoints only: a hand-built multi-keyframe move on a still is
   /// approximated by its first and last values, and says so, rather than
   /// silently freezing the way the static path did.
+  /// Renders an animated transform through `zoompan`.
+  ///
+  /// Applies to video as well as stills: `zoompan` at `d=1` emits one frame
+  /// per input frame, so a clip keeps its length and its motion. The obvious
+  /// alternative — time expressions in `crop` — is not safe to build on:
+  /// FFmpeg documents crop's `w`/`h` as evaluated once at configuration, and
+  /// although some builds animate them anyway, FFmpegKit's need not.
   void _appendCameraMove(
     FilterChain chain,
-    ImageClip clip, {
+    Clip clip, {
     required int fps,
     required int outWidth,
     required int outHeight,
@@ -897,8 +935,8 @@ class TimelineCompiler {
     if ([transform.scaleX, transform.x, transform.y]
         .any((c) => c.keyframes.length > 2)) {
       warnings.add(
-        'A still\u2019s camera move has more than two keyframes; the export '
-        'plays it as one move between the first and last.',
+        'A camera move has more than two keyframes; the export plays it as '
+        'one move between the first and last.',
       );
     }
 
@@ -925,7 +963,13 @@ class TimelineCompiler {
     // Oversampled fit, then the moving window. A positive transform.x moves
     // the image right, which moves the crop window left — hence the minus.
     chain
-      ..thenAll(Filters.scaleToFit(outWidth * 2, outHeight * 2))
+      ..thenAll(
+        Filters.scaleToFit(
+          outWidth * 2,
+          outHeight * 2,
+          background: 0x00000000,
+        ),
+      )
       ..then(
         Filter('zoompan', {
           'z': ramp(zoomFrom, zoomTo),
@@ -938,15 +982,27 @@ class TimelineCompiler {
       );
   }
 
-  /// Crop → flip → rotate → fit into the canvas. Order matters: cropping after
-  /// a rotation would cut the wrong region.
+  /// Crop → flip → rotate → **place**. Order matters: cropping after a
+  /// rotation would cut the wrong region.
+  ///
+  /// "Place" is the part that used to be missing. The old path fitted every
+  /// layer to the canvas, centred, and threw the transform's position and
+  /// scale away — so a PiP the user had dragged into a corner snapped back to
+  /// the middle on export, and a scaled one came out unscaled because the fit
+  /// simply undid the scale. The layer is now scaled to its real size and
+  /// padded at its real offset, which is what the preview does.
+  ///
+  /// Every layer keeps the canvas as its frame size, because the track-level
+  /// `concat`/`xfade` requires all its segments to match. Position therefore
+  /// lives in the pad offset rather than in the overlay step.
   void _appendGeometry(
     FilterChain chain,
     Transform2D transform,
     MediaAsset asset,
     int outWidth,
-    int outHeight,
-  ) {
+    int outHeight, {
+    LayerFrame frame = LayerFrame.none,
+  }) {
     if (!transform.crop.isNone) {
       chain.then(
         Filters.crop(
@@ -976,18 +1032,116 @@ class TimelineCompiler {
       }
     }
 
-    final scale = transform.scaleX.staticValue;
-    if ((scale - 1).abs() > 0.001) {
-      chain.then(
-        Filter('scale', {
-          'w': 'iw*${FilterGraph.formatDouble(scale)}',
-          'h': 'ih*${FilterGraph.formatDouble(transform.scaleY.staticValue)}',
-          'flags': 'bicubic',
+    chain.thenAll(
+      _placement(
+        transform: transform,
+        asset: asset,
+        outWidth: outWidth,
+        outHeight: outHeight,
+        frame: frame,
+      ),
+    );
+  }
+
+  /// Scale-and-place filters for one layer.
+  ///
+  /// Exposed for tests and reused by every clip kind, so "where does a layer
+  /// land" has exactly one answer in the codebase.
+  static List<Filter> _placement({
+    required Transform2D transform,
+    required MediaAsset asset,
+    required int outWidth,
+    required int outHeight,
+    LayerFrame frame = LayerFrame.none,
+  }) {
+    // The fitted size is the baseline the user's scale multiplies: scale 1
+    // means "as large as it goes without cropping", which is what the preview
+    // shows and what every editor means by 100%.
+    final sourceW = asset.displayWidth <= 0 ? outWidth : asset.displayWidth;
+    final sourceH = asset.displayHeight <= 0 ? outHeight : asset.displayHeight;
+    final fitScale = math.min(outWidth / sourceW, outHeight / sourceH);
+
+    final layerW = _even(sourceW * fitScale * transform.scaleX.staticValue);
+    final layerH = _even(sourceH * fitScale * transform.scaleY.staticValue);
+    if (layerW <= 0 || layerH <= 0) {
+      return _offCanvas(outWidth, outHeight);
+    }
+
+    // Centre, then move by the transform — the same arithmetic the preview's
+    // Transform widget performs.
+    final left =
+        ((outWidth - layerW) / 2 + transform.x.staticValue * outWidth).round();
+    final top =
+        ((outHeight - layerH) / 2 + transform.y.staticValue * outHeight)
+            .round();
+
+    final filters = <Filter>[
+      Filter('scale', {'w': layerW, 'h': layerH, 'flags': 'bicubic'}),
+      // Rounded corners and the border are cut here, while the layer is still
+      // at its own size — after padding they would follow the canvas edges.
+      ...FrameCompiler.build(frame, layerW, layerH),
+    ];
+
+    // Anything hanging off an edge has to be cut away before padding: `pad`
+    // can only grow a frame, never crop one, and a negative offset is an
+    // error rather than a shift.
+    final cropX = math.max(0, -left);
+    final cropY = math.max(0, -top);
+    final visibleLeft = math.max(0, left);
+    final visibleTop = math.max(0, top);
+    final cropW = math.min(layerW - cropX, outWidth - visibleLeft);
+    final cropH = math.min(layerH - cropY, outHeight - visibleTop);
+
+    if (cropW <= 0 || cropH <= 0) {
+      // Entirely off-canvas. A transparent frame keeps the track's segment
+      // count and timing intact instead of desynchronising the concat.
+      return _offCanvas(outWidth, outHeight);
+    }
+
+    if (cropX != 0 || cropY != 0 || cropW != layerW || cropH != layerH) {
+      filters.add(
+        Filter('crop', {'w': cropW, 'h': cropH, 'x': cropX, 'y': cropY}),
+      );
+    }
+
+    if (cropW != outWidth || cropH != outHeight ||
+        visibleLeft != 0 || visibleTop != 0) {
+      filters.add(
+        Filter('pad', {
+          'w': outWidth,
+          'h': outHeight,
+          'x': visibleLeft,
+          'y': visibleTop,
+          // Transparent, not black. An opaque surround on an upper track
+          // would hide every layer beneath it — the frame is made opaque by
+          // the base colour source at the bottom of the stack, not by the
+          // layers.
+          'color': FilterGraph.colorFrom(0x00000000),
         }),
       );
     }
 
-    chain.thenAll(Filters.scaleToFit(outWidth, outHeight));
+    return filters;
+  }
+
+  static List<Filter> _offCanvas(int outWidth, int outHeight) => [
+    Filter('scale', {'w': 2, 'h': 2, 'flags': 'neighbor'}),
+    Filter('pad', {
+      'w': outWidth,
+      'h': outHeight,
+      'x': 0,
+      'y': 0,
+      'color': FilterGraph.colorFrom(0x00000000),
+    }),
+    Filter('format', {'pix_fmts': 'yuva420p'}),
+    Filter('colorchannelmixer', {'aa': 0}),
+  ];
+
+  /// H.264 needs even dimensions, and an odd intermediate makes chroma
+  /// subsampling round unpredictably between filters.
+  static int _even(double value) {
+    final rounded = value.round();
+    return rounded.isEven ? rounded : rounded + 1;
   }
 
   /// Appends the clip's effect filters, wiring up `sendcmd` automation when

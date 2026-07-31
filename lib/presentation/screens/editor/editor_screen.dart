@@ -40,6 +40,7 @@ import 'sheets/ai_tools_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/history_sheet.dart';
 import 'sheets/jump_cut_sheet.dart';
+import 'sheets/layout_sheet.dart';
 import 'sheets/mask_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
@@ -543,6 +544,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: RhythmSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.layout:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: LayoutSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.group:
         controller.toggleGroup();
         await HapticFeedback.selectionClick();
@@ -801,6 +809,7 @@ enum _ToolAction {
   rhythm,
   jumpCut,
   group,
+  layout,
   mixer,
   addTrack,
 }
@@ -940,6 +949,12 @@ class _ToolRail extends ConsumerWidget {
         label: strings.toolJumpCut,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.jumpCut),
+      ),
+      ToolIconButton(
+        icon: Icons.dashboard_rounded,
+        label: strings.toolLayout,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.layout),
       ),
       ToolIconButton(
         icon: Icons.join_full_rounded,

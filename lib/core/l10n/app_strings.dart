@@ -82,6 +82,7 @@ abstract class AppStrings {
   String get toolDuplicate;
   String get toolJumpCut;
   String get toolGroup;
+  String get toolLayout;
 
   // ── Export ───────────────────────────────────────────────────────────
   String get startExport;
@@ -214,6 +215,8 @@ class AppStringsEn extends AppStrings {
   String get toolJumpCut => 'Jump cut';
   @override
   String get toolGroup => 'Group';
+  @override
+  String get toolLayout => 'Layout';
 
   @override
   String get startExport => 'Start export';
@@ -366,6 +369,8 @@ class AppStringsBn extends AppStrings {
   String get toolJumpCut => 'জাম্প কাট';
   @override
   String get toolGroup => 'গ্রুপ';
+  @override
+  String get toolLayout => 'লেআউট';
 
   @override
   String get startExport => 'এক্সপোর্ট শুরু করুন';

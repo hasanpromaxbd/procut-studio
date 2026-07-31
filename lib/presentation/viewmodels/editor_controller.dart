@@ -21,6 +21,7 @@ import '../../domain/entities/clip.dart';
 import '../../domain/entities/ducking.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/keyframe.dart';
+import '../../domain/entities/layer_frame.dart';
 import '../../domain/entities/marker.dart';
 import '../../domain/entities/mask.dart';
 import '../../domain/entities/media_asset.dart';
@@ -1042,6 +1043,88 @@ class EditorController extends Notifier<EditorState?> {
         [for (final s in spans) (start: s.start, end: s.end)],
       ),
       'remove ${spans.length} silence(s)',
+    );
+  }
+
+  // ── Layout ───────────────────────────────────────────────────────────
+
+  void setLayerFrame(LayerFrame frame) => _applyToSelection(
+    (timeline, clipId) =>
+        TimelineOperations.setFrame(timeline, clipId, frame),
+    'layer frame',
+  );
+
+  void setLayerScale(double scale) => _applyToSelection(
+    (timeline, clipId) => _mapTransform(
+      timeline,
+      clipId,
+      (t) => t.copyWith(
+        scaleX: AnimatableDouble(scale),
+        scaleY: AnimatableDouble(scale),
+      ),
+    ),
+    'layer size',
+  );
+
+  void setLayerPosition({double? x, double? y}) => _applyToSelection(
+    (timeline, clipId) => _mapTransform(
+      timeline,
+      clipId,
+      (t) => t.copyWith(
+        x: x == null ? null : AnimatableDouble(x),
+        y: y == null ? null : AnimatableDouble(y),
+      ),
+    ),
+    'layer position',
+  );
+
+  void resetLayerPlacement() => _applyToSelection(
+    (timeline, clipId) => _mapTransform(
+      timeline,
+      clipId,
+      (t) => t.copyWith(
+        scaleX: const AnimatableDouble(1),
+        scaleY: const AnimatableDouble(1),
+        x: const AnimatableDouble(0),
+        y: const AnimatableDouble(0),
+      ),
+    ),
+    'reset placement',
+  );
+
+  /// Arranges the selection into [layout], in timeline order.
+  void applyLayout(SplitLayout layout) {
+    final current = state;
+    if (current == null || !current.hasSelection) return;
+    _apply(
+      TimelineOperations.applyLayout(
+        current.timeline,
+        current.selectedClips.map((c) => c.id).toList(),
+        layout,
+      ),
+      layout.label.toLowerCase(),
+    );
+  }
+
+  Result<Timeline> _mapTransform(
+    Timeline timeline,
+    String clipId,
+    Transform2D Function(Transform2D) change,
+  ) {
+    final clip = timeline.findClip(clipId)?.$2;
+    if (clip == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+    final track = timeline.findClip(clipId)!.$1;
+    return Result.ok(
+      timeline.replaceTrack(
+        track.replaceClip(
+          clip.copyWithBase(transform: change(clip.transform)),
+        ),
+      ),
     );
   }
 

@@ -11,6 +11,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/utils/time_utils.dart';
 import 'effect.dart';
 import 'keyframe.dart';
+import 'layer_frame.dart';
 import 'mask.dart';
 import 'subtitle.dart' show WordTiming;
 import 'text_style_spec.dart';
@@ -48,6 +49,7 @@ sealed class Clip {
     this.effects = const [],
     this.outTransition,
     this.mask = Mask.none,
+    this.frame = LayerFrame.none,
   });
 
   final String id;
@@ -76,6 +78,10 @@ sealed class Clip {
 
   /// Shape mask. Inactive by default; costs nothing when so.
   final Mask mask;
+
+  /// Rounded corners and border, in the layer's own coordinates — the
+  /// picture-in-picture dressing. See [LayerFrame] for why it is not a mask.
+  final LayerFrame frame;
 
   ClipKind get kind;
 
@@ -110,6 +116,7 @@ sealed class Clip {
     Transition? outTransition,
     bool clearTransition = false,
     Mask? mask,
+    LayerFrame? frame,
   });
 
   Map<String, dynamic> toJson();
@@ -128,6 +135,7 @@ sealed class Clip {
       'effects': effects.map((e) => e.toJson()).toList(),
     if (outTransition != null) 'outTransition': outTransition!.toJson(),
     if (mask.isActive) 'mask': mask.toJson(),
+    if (frame.isActive) 'frame': frame.toJson(),
   };
 
   static Clip fromJson(Map<String, dynamic> json) =>
@@ -186,6 +194,7 @@ sealed class MediaClip extends Clip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
   });
 
   final String assetId;
@@ -304,6 +313,7 @@ final class VideoClip extends MediaClip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
     this.volume = const AnimatableDouble.constant(1),
     this.muted = false,
     this.audioFadeIn = Duration.zero,
@@ -357,6 +367,7 @@ final class VideoClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
     AnimatableDouble? volume,
     bool? muted,
@@ -401,6 +412,7 @@ final class VideoClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -414,6 +426,7 @@ final class VideoClip extends MediaClip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -447,6 +460,7 @@ final class VideoClip extends MediaClip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
     volume: AnimatableDouble.fromJson(json['volume'], fallback: 1),
     muted: json['muted'] as bool? ?? false,
     audioFadeIn: Duration(microseconds: (json['fadeInUs'] as num?)?.toInt() ?? 0),
@@ -478,6 +492,7 @@ final class AudioClip extends MediaClip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
     this.volume = const AnimatableDouble.constant(1),
     this.muted = false,
     this.fadeIn = Duration.zero,
@@ -537,6 +552,7 @@ final class AudioClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
     AnimatableDouble? volume,
     bool? muted,
@@ -586,6 +602,7 @@ final class AudioClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -598,6 +615,7 @@ final class AudioClip extends MediaClip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -632,6 +650,7 @@ final class AudioClip extends MediaClip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
     volume: AnimatableDouble.fromJson(json['volume'], fallback: 1),
     muted: json['muted'] as bool? ?? false,
     fadeIn: Duration(microseconds: (json['fadeInUs'] as num?)?.toInt() ?? 0),
@@ -717,6 +736,7 @@ final class ImageClip extends MediaClip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
   }) : super(sourceIn: Duration.zero, speed: 1.0, reversed: false);
 
   @override
@@ -739,6 +759,7 @@ final class ImageClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => ImageClip(
     id: id ?? this.id,
@@ -753,6 +774,7 @@ final class ImageClip extends MediaClip {
     effects: effects ?? this.effects,
     outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
     mask: mask ?? this.mask,
+    frame: frame ?? this.frame,
   );
 
   @override
@@ -767,6 +789,7 @@ final class ImageClip extends MediaClip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -780,6 +803,7 @@ final class ImageClip extends MediaClip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -800,6 +824,7 @@ final class ImageClip extends MediaClip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
   );
 }
 
@@ -827,6 +852,7 @@ final class TextClip extends Clip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
   });
 
   final String text;
@@ -887,6 +913,7 @@ final class TextClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => TextClip(
     id: id ?? this.id,
@@ -907,6 +934,7 @@ final class TextClip extends Clip {
     effects: effects ?? this.effects,
     outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
     mask: mask ?? this.mask,
+    frame: frame ?? this.frame,
   );
 
   @override
@@ -921,6 +949,7 @@ final class TextClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -934,6 +963,7 @@ final class TextClip extends Clip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -975,6 +1005,7 @@ final class TextClip extends Clip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
   );
 }
 
@@ -999,6 +1030,7 @@ final class StickerClip extends Clip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
   });
 
   /// Catalogue id for a bundled sticker.
@@ -1034,6 +1066,7 @@ final class StickerClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => StickerClip(
     id: id ?? this.id,
@@ -1064,6 +1097,7 @@ final class StickerClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -1077,6 +1111,7 @@ final class StickerClip extends Clip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -1106,6 +1141,7 @@ final class StickerClip extends Clip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
   );
 }
 
@@ -1173,6 +1209,7 @@ final class CompoundClip extends Clip {
     super.effects,
     super.outTransition,
     super.mask,
+    super.frame,
   });
 
   /// Members, in timeline order, starts relative to the compound. Never
@@ -1200,6 +1237,7 @@ final class CompoundClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => CompoundClip(
     id: id ?? this.id,
@@ -1214,6 +1252,7 @@ final class CompoundClip extends Clip {
     effects: effects ?? this.effects,
     outTransition: clearTransition ? null : (outTransition ?? this.outTransition),
     mask: mask ?? this.mask,
+    frame: frame ?? this.frame,
   );
 
   @override
@@ -1228,6 +1267,7 @@ final class CompoundClip extends Clip {
     List<Effect>? effects,
     Transition? outTransition,
     Mask? mask,
+    LayerFrame? frame,
     bool clearTransition = false,
   }) => copyWith(
     start: start,
@@ -1241,6 +1281,7 @@ final class CompoundClip extends Clip {
     outTransition: outTransition,
     clearTransition: clearTransition,
     mask: mask,
+    frame: frame,
   );
 
   @override
@@ -1266,5 +1307,6 @@ final class CompoundClip extends Clip {
     effects: _effectsFromJson(json),
     outTransition: _transitionFromJson(json),
     mask: Mask.fromJson((json['mask'] as Map?)?.cast<String, dynamic>()),
+    frame: LayerFrame.fromJson((json['frame'] as Map?)?.cast<String, dynamic>()),
   );
 }
