@@ -153,6 +153,13 @@ abstract interface class AiRepository {
     void Function(double progress)? onProgress,
   });
 
+  /// Measures a frame with `signalstats`. The raw reading, so callers can
+  /// compare two shots rather than each re-deriving statistics.
+  Future<Result<Map<String, double>>> frameStatistics(
+    MediaAsset asset, {
+    Duration? sampleAt,
+  });
+
   Future<Result<List<SceneCut>>> detectScenes(
     MediaAsset asset, {
     double threshold = 0.35,

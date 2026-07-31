@@ -245,6 +245,38 @@ class AiService implements AiRepository {
   }
 
   @override
+  Future<Result<Map<String, double>>> frameStatistics(
+    MediaAsset asset, {
+    Duration? sampleAt,
+  }) async {
+    final at =
+        sampleAt ?? Duration(microseconds: asset.duration.inMicroseconds ~/ 3);
+    final command = [
+      '-hide_banner',
+      '-ss', (at.inMicroseconds / 1e6).toStringAsFixed(3),
+      '-i', _quote(asset.previewPath),
+      '-frames:v', '1',
+      '-vf', 'signalstats,metadata=print',
+      '-an',
+      '-f', 'null', '-',
+    ].join(' ');
+
+    final result = await _ffmpeg.run(command, queued: false);
+    return result.fold(
+      (output) {
+        final stats = _parseSignalStats(output.logTail);
+        if (stats.isEmpty) {
+          return const Result.err(
+            MediaProcessingFailure('Could not read a frame to measure.'),
+          );
+        }
+        return Result.ok(stats);
+      },
+      Result.err,
+    );
+  }
+
+  @override
   Future<Result<Map<String, double>>> suggestColorEnhancement(
     MediaAsset asset, {
     Duration? sampleAt,

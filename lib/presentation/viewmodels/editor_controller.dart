@@ -17,6 +17,7 @@ import '../../core/error/result.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/utils/debouncer.dart';
 import '../../core/utils/id_generator.dart';
+import '../../core/utils/time_utils.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/ducking.dart';
 import '../../domain/entities/effect.dart';
@@ -38,6 +39,7 @@ import '../../domain/repositories/project_repository.dart';
 import '../../domain/usecases/timeline_operations.dart';
 import '../../engine/audio/silence_detector.dart';
 import '../../engine/effects/effect_catalog.dart';
+import '../../engine/effects/shot_matcher.dart';
 import 'editor_state.dart';
 import 'playhead_controller.dart';
 
@@ -1043,6 +1045,246 @@ class EditorController extends Notifier<EditorState?> {
         [for (final s in spans) (start: s.start, end: s.end)],
       ),
       'remove ${spans.length} silence(s)',
+    );
+  }
+
+  // ── Inside a group ───────────────────────────────────────────────────
+
+  /// Opens a group for editing, swapping the visible timeline for its
+  /// contents.
+  ///
+  /// Nothing downstream knows this happened: every operation, the preview and
+  /// the timeline widget all see an ordinary timeline. That is the entire
+  /// point of doing it this way rather than threading an "inside a group"
+  /// flag through the edit code.
+  void enterGroup(String compoundId) {
+    final current = state;
+    if (current == null || current.isInsideGroup) return;
+
+    final found = current.timeline.findClip(compoundId);
+    final compound = found?.$2;
+    if (compound is! CompoundClip) return;
+    if (compound.locked) {
+      state = current.copyWith(errorMessage: 'This group is locked.');
+      return;
+    }
+
+    // One track holding the members, at their own local times. Canvas size
+    // and frame rate carry over so the preview frames identically.
+    final inner = Timeline(
+      fps: current.timeline.fps,
+      width: current.timeline.width,
+      height: current.timeline.height,
+      backgroundColor: current.timeline.backgroundColor,
+      tracks: [
+        Track(
+          id: 'inner',
+          type: TrackType.video,
+          name: compound.label ?? 'Group',
+          clips: [
+            for (final clip in compound.innerClips)
+              clip.copyWithBase(trackId: 'inner'),
+          ],
+        ),
+      ],
+    );
+
+    state = current.copyWith(
+      project: current.project.withTimeline(inner),
+      compoundEdit: CompoundEdit(
+        compoundId: compoundId,
+        outerTimeline: current.timeline,
+        outerUndoStack: current.undoStack,
+        outerRedoStack: current.redoStack,
+        label: compound.label ?? 'Group',
+      ),
+      undoStack: const [],
+      redoStack: const [],
+      clearSelection: true,
+      clearMessages: true,
+    );
+    ref.read(playheadControllerProvider.notifier)
+      ..setDuration(inner.duration)
+      ..seek(Duration.zero);
+    _log.i('entered group', fields: {'id': compoundId});
+  }
+
+  /// Writes the inner edits back and returns to the outer timeline.
+  void exitGroup() {
+    final current = state;
+    final context = current?.compoundEdit;
+    if (current == null || context == null) return;
+
+    final edited = current.timeline.tracks
+        .expand((t) => t.clips)
+        .toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+
+    final outer = context.outerTimeline;
+    final found = outer.findClip(context.compoundId);
+    if (found == null) {
+      // The group vanished from under us — restore the outer timeline rather
+      // than losing the whole session.
+      state = current.copyWith(
+        project: current.project.withTimeline(outer),
+        undoStack: context.outerUndoStack,
+        redoStack: context.outerRedoStack,
+        clearCompoundEdit: true,
+        errorMessage: 'That group no longer exists.',
+      );
+      return;
+    }
+
+    final (track, clip) = found;
+    final compound = clip as CompoundClip;
+    final content = edited.isEmpty
+        ? Duration.zero
+        : edited.map((c) => c.end).reduce(TimeUtils.max);
+
+    // The window follows the content only when it was following it before —
+    // a window the user deliberately trimmed keeps its length, which is what
+    // makes trimming a group meaningful.
+    final windowFollowed =
+        (compound.duration - compound.contentDuration).abs() <
+        const Duration(milliseconds: 2);
+
+    final updated = compound.copyWith(
+      innerClips: [
+        for (final c in edited) c.copyWithBase(trackId: 'inner'),
+      ],
+      duration: windowFollowed
+          ? content
+          : (content < compound.duration ? content : compound.duration),
+    );
+
+    final restored = outer.replaceTrack(track.replaceClip(updated));
+
+    state = current.copyWith(
+      project: current.project.withTimeline(restored),
+      // One entry for the whole session: from outside, the group changed
+      // once, and that is what undo should step over.
+      undoStack: [
+        ...context.outerUndoStack,
+        UndoEntry(timeline: outer, label: 'edit group'),
+      ],
+      redoStack: const [],
+      isDirty: true,
+      clearCompoundEdit: true,
+      clearSelection: true,
+      clearMessages: true,
+    );
+    ref.read(playheadControllerProvider.notifier)
+        .setDuration(restored.duration);
+    _scheduleSave();
+    _log.i('left group', fields: {'id': context.compoundId});
+  }
+
+  // ── Media housekeeping ───────────────────────────────────────────────
+
+  /// Drops assets no clip references any more.
+  ///
+  /// Project bookkeeping only — the files stay on the device, because this
+  /// app did not put most of them there and deleting a user's camera roll
+  /// because they removed a clip would be indefensible.
+  void pruneUnusedMedia() {
+    final current = state;
+    if (current == null) return;
+
+    final before = current.project.assets.length;
+    final pruned = current.project.pruneAssets();
+    if (pruned.assets.length == before) {
+      state = current.copyWith(statusMessage: 'Nothing unused to remove.');
+      return;
+    }
+
+    state = current.copyWith(
+      project: pruned,
+      isDirty: true,
+      statusMessage:
+          '${before - pruned.assets.length} unused item(s) removed',
+    );
+    _scheduleSave();
+  }
+
+  // ── Shot matching ────────────────────────────────────────────────────
+
+  /// Measures the selected clip against [referenceClipId] and returns the
+  /// correction, without applying it — the sheet shows what it would do
+  /// first, because a colour change the user did not expect is worse than one
+  /// they had to tap twice for.
+  Future<({ShotMatch match, double distance})?> proposeShotMatch(
+    String referenceClipId,
+  ) async {
+    final current = state;
+    final targetId = current?.selectedClipId;
+    if (current == null || targetId == null) return null;
+
+    final target = current.timeline.findClip(targetId)?.$2;
+    final reference = current.timeline.findClip(referenceClipId)?.$2;
+    if (target is! MediaClip || reference is! MediaClip) return null;
+
+    final targetAsset = current.project.asset(target.assetId);
+    final referenceAsset = current.project.asset(reference.assetId);
+    if (targetAsset == null || referenceAsset == null) return null;
+
+    final ai = ref.read(aiRepositoryProvider);
+    // Sample the middle of each clip's own window rather than the file's, so
+    // a trimmed clip is measured on what it actually shows.
+    final targetStats = await ai.frameStatistics(
+      targetAsset,
+      sampleAt: target.sourceIn + target.sourceDuration ~/ 2,
+    );
+    final referenceStats = await ai.frameStatistics(
+      referenceAsset,
+      sampleAt: reference.sourceIn + reference.sourceDuration ~/ 2,
+    );
+
+    final a = FrameStats.fromSignalStats(targetStats.getOrElse(const {}));
+    final b = FrameStats.fromSignalStats(referenceStats.getOrElse(const {}));
+    if (a == null || b == null) {
+      state = state?.copyWith(
+        errorMessage: 'Could not measure one of those shots.',
+      );
+      return null;
+    }
+
+    return (
+      match: ShotMatcher.match(shot: a, reference: b),
+      distance: ShotMatcher.distance(a, b),
+    );
+  }
+
+  /// Applies a proposed match as an ordinary colour-adjust effect, so it can
+  /// be tuned or removed like any other.
+  void applyShotMatch(ShotMatch match) =>
+      applyColorSuggestion(match.toParams());
+
+  // ── Captions ─────────────────────────────────────────────────────────
+
+  void restyleCaptions(TextStyleSpec style) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.restyleCaptions(current.timeline, style),
+      'restyle captions',
+    );
+  }
+
+  void nudgeCaptions(Duration by) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.nudgeCaptions(current.timeline, by),
+      'shift captions',
+    );
+  }
+
+  void mergeCaption(String clipId) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.mergeCaption(current.timeline, clipId),
+      'merge captions',
     );
   }
 

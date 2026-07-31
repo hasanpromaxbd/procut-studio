@@ -16,11 +16,12 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  273 tests, all passing
+flutter test                 →  327 tests, all passing
 flutter build apk --release  →  built (117 MB, R8 + shrinker)
 tool/verify_shaders.sh       →  PASS (real impellerc)
 tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
 tool/verify_ducking.sh       →  PASS (real ffmpeg, measured 6 dB duck)
+tool/verify_placement.sh     →  PASS (real ffmpeg, pixel-checked composite)
 ```
 
 Verified against Flutter 3.44.6 / Dart 3.12.2 / AGP 9.0.1 / Gradle 9.1.
@@ -50,6 +51,9 @@ what is architected with a working seam but needs an external piece. See
 | Loudness normalisation, voice presets, audio crossfade | Implemented — verified against real ffmpeg |
 | LUT import, karaoke captions, snapshot, GIF export | Implemented |
 | TTS voiceover, Bdrive backup (resumable, real protocol) | Implemented + tested |
+| Layer placement: position, scale, transparent stacking | Implemented + tested — pixel-verified |
+| PiP frames, split-screen layouts, caption editor | Implemented + tested |
+| Shot colour match, media manager, edit-inside-a-group | Implemented + tested |
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |

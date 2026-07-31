@@ -37,11 +37,13 @@ import '../export/export_screen.dart';
 import '../home/templates_screen.dart';
 import 'editor_shortcuts.dart';
 import 'sheets/ai_tools_sheet.dart';
+import 'sheets/caption_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/history_sheet.dart';
 import 'sheets/jump_cut_sheet.dart';
 import 'sheets/layout_sheet.dart';
 import 'sheets/mask_sheet.dart';
+import 'sheets/media_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
 import 'sheets/record_sheet.dart';
@@ -134,9 +136,18 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        await ref
-            .read(editorControllerProvider(widget.projectId).notifier)
-            .flush();
+        final controller = ref.read(
+          editorControllerProvider(widget.projectId).notifier,
+        );
+        // Back out of a group first: leaving with it still open would discard
+        // the whole inner session.
+        if (ref.read(editorControllerProvider(widget.projectId))
+                ?.isInsideGroup ??
+            false) {
+          controller.exitGroup();
+          return;
+        }
+        await controller.flush();
         if (context.mounted) Navigator.of(context).pop();
       },
       child: EditorShortcutsScope(
@@ -145,6 +156,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           appBar: _buildAppBar(editor),
           body: Column(
             children: [
+              if (editor.isInsideGroup)
+                _GroupBreadcrumb(projectId: widget.projectId),
               Expanded(
                 flex: isTablet ? 6 : 5,
                 child: isTablet
@@ -544,6 +557,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: RhythmSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.media:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: MediaSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.captions:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: CaptionSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.layout:
         if (!mounted) return;
         await ToolSheet.show<void>(
@@ -810,6 +837,8 @@ enum _ToolAction {
   jumpCut,
   group,
   layout,
+  captions,
+  media,
   mixer,
   addTrack,
 }
@@ -951,6 +980,16 @@ class _ToolRail extends ConsumerWidget {
         onPressed: () => onAction(_ToolAction.jumpCut),
       ),
       ToolIconButton(
+        icon: Icons.perm_media_rounded,
+        label: strings.toolMedia2,
+        onPressed: () => onAction(_ToolAction.media),
+      ),
+      ToolIconButton(
+        icon: Icons.closed_caption_rounded,
+        label: strings.toolCaptions,
+        onPressed: () => onAction(_ToolAction.captions),
+      ),
+      ToolIconButton(
         icon: Icons.dashboard_rounded,
         label: strings.toolLayout,
         enabled: hasSelection,
@@ -996,6 +1035,64 @@ class _ToolRail extends ConsumerWidget {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: Spacing.sm),
           children: buttons,
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Shown while the editor is inside a group: where you are and the way out.
+///
+/// A modal state with no visible indicator is how people lose work, so this
+/// is a bar rather than a subtle badge.
+class _GroupBreadcrumb extends ConsumerWidget {
+  const _GroupBreadcrumb({required this.projectId});
+
+  final String projectId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final editor = ref.watch(editorControllerProvider(projectId));
+    final context0 = editor?.compoundEdit;
+    if (context0 == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.primaryContainer,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Spacing.md,
+            vertical: Spacing.xs,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.subdirectory_arrow_right_rounded,
+                size: 18,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  'Inside "${context0.label}" — edits apply to the group',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(
+                onPressed: () => ref
+                    .read(editorControllerProvider(projectId).notifier)
+                    .exitGroup(),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
         ),
       ),
     );

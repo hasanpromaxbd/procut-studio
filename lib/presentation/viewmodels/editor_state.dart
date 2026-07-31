@@ -62,6 +62,7 @@ class EditorState {
     this.busyMessage,
     this.errorMessage,
     this.statusMessage,
+    this.compoundEdit,
   });
 
   final Project project;
@@ -84,6 +85,11 @@ class EditorState {
 
   /// Copied clips, kept in timeline order so paste preserves their spacing.
   final List<Clip> clipboard;
+
+  /// Set while the editor is *inside* a group. See [CompoundEdit].
+  final CompoundEdit? compoundEdit;
+
+  bool get isInsideGroup => compoundEdit != null;
 
   bool get canPaste => clipboard.isNotEmpty;
   final EditorTool activeTool;
@@ -148,6 +154,8 @@ class EditorState {
     String? busyMessage,
     String? errorMessage,
     String? statusMessage,
+    CompoundEdit? compoundEdit,
+    bool clearCompoundEdit = false,
     bool clearSelection = false,
     bool clearMessages = false,
   }) => EditorState(
@@ -165,6 +173,8 @@ class EditorState {
     busyMessage: isBusy == false ? null : (busyMessage ?? this.busyMessage),
     errorMessage: clearMessages ? null : (errorMessage ?? this.errorMessage),
     statusMessage: clearMessages ? null : (statusMessage ?? this.statusMessage),
+    compoundEdit:
+        clearCompoundEdit ? null : (compoundEdit ?? this.compoundEdit),
   );
 
   /// Pushes the current timeline onto the undo stack and installs [next].
@@ -195,4 +205,34 @@ class EditorState {
   /// here so the user does not have to press undo forty times.
   EditorState withLiveEdit(Timeline next) =>
       copyWith(project: project.withTimeline(next), isDirty: true);
+}
+
+
+/// What the editor stepped out of to edit a group's insides.
+///
+/// Entering a group swaps the visible timeline for one built from its members
+/// — which is what makes every existing operation work in there unchanged,
+/// with no "inside a group" special case anywhere in the edit code. This
+/// holds what has to come back afterwards.
+///
+/// The outer undo stack is parked here too. Inner edits get their own fresh
+/// history, and on exit the outer stack returns with a single entry for the
+/// whole session — from outside, the group changed once, which is what a user
+/// expects to undo.
+class CompoundEdit {
+  const CompoundEdit({
+    required this.compoundId,
+    required this.outerTimeline,
+    required this.outerUndoStack,
+    required this.outerRedoStack,
+    required this.label,
+  });
+
+  final String compoundId;
+  final Timeline outerTimeline;
+  final List<UndoEntry> outerUndoStack;
+  final List<UndoEntry> outerRedoStack;
+
+  /// Shown in the breadcrumb, so the user knows where they are.
+  final String label;
 }

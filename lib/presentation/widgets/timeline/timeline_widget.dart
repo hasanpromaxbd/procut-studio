@@ -94,6 +94,11 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapDown: (details) => _handleTap(details, view, timeline),
+                  onDoubleTapDown: (details) =>
+                      _handleDoubleTap(details, view, timeline),
+                  // A double tap on a group opens it; the handler must exist
+                  // for onDoubleTapDown to fire at all.
+                  onDoubleTap: () {},
                   onScaleStart: (details) =>
                       _handleScaleStart(details, view, timeline),
                   onScaleUpdate: (details) =>
@@ -177,6 +182,25 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
   }
 
   // ── Gestures ─────────────────────────────────────────────────────────
+
+  /// Double-tapping a group steps inside it.
+  void _handleDoubleTap(
+    TapDownDetails details,
+    TimelineViewState view,
+    Timeline timeline,
+  ) {
+    final hit = view.hitTest(
+      timeline,
+      details.localPosition.dx,
+      details.localPosition.dy,
+    );
+    if (hit.clip is! CompoundClip) return;
+
+    HapticFeedback.mediumImpact();
+    ref
+        .read(editorControllerProvider(widget.projectId).notifier)
+        .enterGroup(hit.clip!.id);
+  }
 
   void _handleTap(
     TapDownDetails details,

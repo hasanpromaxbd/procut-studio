@@ -21,6 +21,7 @@ import '../entities/keyframe.dart';
 import '../entities/layer_frame.dart';
 import '../entities/marker.dart';
 import '../entities/mask.dart';
+import '../entities/text_style_spec.dart';
 import '../entities/timeline.dart';
 import '../entities/track.dart';
 import '../entities/transform2d.dart';
@@ -1852,6 +1853,125 @@ abstract final class TimelineOperations {
     }
 
     return Result.ok(next);
+  }
+
+  // ── Captions ─────────────────────────────────────────────────────────
+
+  /// Restyles every caption clip on the timeline in one edit.
+  ///
+  /// Acts on `isSubtitle` clips only, so hand-placed titles sharing a track
+  /// keep their own look — that flag is exactly what it is for.
+  static Result<Timeline> restyleCaptions(
+    Timeline timeline,
+    TextStyleSpec style,
+  ) {
+    var changed = 0;
+    final tracks = <Track>[];
+    for (final track in timeline.tracks) {
+      if (track.locked) {
+        tracks.add(track);
+        continue;
+      }
+      tracks.add(
+        track.withClips([
+          for (final clip in track.clips)
+            if (clip is TextClip && clip.isSubtitle)
+              () {
+                changed++;
+                return clip.copyWith(style: style);
+              }()
+            else
+              clip,
+        ]),
+      );
+    }
+    if (changed == 0) {
+      return const Result.err(InvalidEditFailure('There are no captions.'));
+    }
+    return Result.ok(timeline.withTracks(tracks));
+  }
+
+  /// Joins a caption to the one after it on its track.
+  ///
+  /// The merged cue spans both and its text is joined with a space; word
+  /// timings survive, shifted into the merged clip's local time, so a merged
+  /// karaoke caption keeps highlighting correctly.
+  static Result<Timeline> mergeCaption(Timeline timeline, String clipId) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Caption not found.'));
+    }
+    final (track, clip) = found;
+    if (clip is! TextClip) {
+      return const Result.err(InvalidEditFailure('That is not a caption.'));
+    }
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final next = track.nextClipAfter(clip.end - _tick);
+    if (next is! TextClip) {
+      return const Result.err(
+        InvalidEditFailure('There is no caption after this one to merge.'),
+      );
+    }
+
+    final gap = next.start - clip.end;
+    final merged = clip.copyWith(
+      duration: next.end - clip.start,
+      text: '${clip.text.trim()} ${next.text.trim()}'.trim(),
+      wordTimings: [
+        ...clip.wordTimings,
+        // The follower's timings are local to *it*; rebase onto the merged
+        // clip's zero, which sits at this clip's start.
+        for (final w in next.wordTimings)
+          w.shifted(clip.duration + gap),
+      ],
+    );
+
+    return Result.ok(
+      timeline.replaceTrack(
+        track.withClips([
+          for (final c in track.clips)
+            if (c.id == clipId) merged else if (c.id != next.id) c,
+        ]),
+      ),
+    );
+  }
+
+  /// Shifts every caption by [by], for fixing a systematic sync offset.
+  static Result<Timeline> nudgeCaptions(Timeline timeline, Duration by) {
+    if (by == Duration.zero) return Result.ok(timeline);
+
+    var changed = 0;
+    final tracks = <Track>[];
+    for (final track in timeline.tracks) {
+      if (track.locked) {
+        tracks.add(track);
+        continue;
+      }
+      tracks.add(
+        track.withClips([
+          for (final clip in track.clips)
+            if (clip is TextClip && clip.isSubtitle)
+              () {
+                changed++;
+                // Never before zero: a caption at a negative time simply
+                // never renders, which reads as "it deleted my captions".
+                final start = clip.start + by;
+                return clip.copyWith(
+                  start: start < Duration.zero ? Duration.zero : start,
+                );
+              }()
+            else
+              clip,
+        ]),
+      );
+    }
+    if (changed == 0) {
+      return const Result.err(InvalidEditFailure('There are no captions.'));
+    }
+    return Result.ok(timeline.withTracks(tracks));
   }
 
   // ── Layout ───────────────────────────────────────────────────────────

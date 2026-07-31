@@ -83,6 +83,10 @@ abstract class AppStrings {
   String get toolJumpCut;
   String get toolGroup;
   String get toolLayout;
+  String get toolCaptions;
+
+  /// The media *manager*, distinct from the import button.
+  String get toolMedia2;
 
   // ── Export ───────────────────────────────────────────────────────────
   String get startExport;
@@ -217,6 +221,10 @@ class AppStringsEn extends AppStrings {
   String get toolGroup => 'Group';
   @override
   String get toolLayout => 'Layout';
+  @override
+  String get toolCaptions => 'Captions';
+  @override
+  String get toolMedia2 => 'Manage';
 
   @override
   String get startExport => 'Start export';
@@ -371,6 +379,10 @@ class AppStringsBn extends AppStrings {
   String get toolGroup => 'গ্রুপ';
   @override
   String get toolLayout => 'লেআউট';
+  @override
+  String get toolCaptions => 'ক্যাপশন';
+  @override
+  String get toolMedia2 => 'ম্যানেজ';
 
   @override
   String get startExport => 'এক্সপোর্ট শুরু করুন';

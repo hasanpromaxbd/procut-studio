@@ -5,9 +5,10 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 273 tests passing, debug and release
-APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh` and
-`tool/verify_ducking.sh` all pass against real impellerc/ffmpeg binaries.
+Verified state: `flutter analyze` clean, 327 tests passing, debug and release
+APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh`, `tool/verify_ducking.sh`
+and `tool/verify_placement.sh` all pass against real impellerc/ffmpeg
+binaries.
 
 ---
 
@@ -296,6 +297,35 @@ Compound-clip limits, stated plainly: single-track membership, no nesting,
 splitting requires ungrouping first, and a compound's animated transform is
 preview-only (static scale/flips do export). The jump-cut assistant requires
 un-reversed, un-ramped clips and says so.
+
+## Fourth wave (July 2026)
+
+Opened by fixing what was broken rather than adding to it.
+
+| Fix | Status |
+|---|---|
+| Layer position reached the export (a moved PiP snapped back to centre) | Fixed + tested + pixel-verified |
+| Layer scale reached the export (the fit-to-canvas undid it) | Fixed + tested |
+| Upper tracks stopped blacking out lower ones (opaque pad → transparent) | Fixed + tested |
+| Animated transforms on *video* render instead of freezing | Fixed + tested |
+
+All four shared one cause: layers were only ever *fitted* to the canvas, never
+*placed*. `tool/verify_placement.sh` proves the composite in pixels — a red PiP
+where the preview puts it, the base layer intact beneath, transparent surround.
+
+| Feature | Status |
+|---|---|
+| Caption editor: inline edit, jump-to-cue, merge, restyle-all, sync nudge | Implemented + tested |
+| Shot colour match (exposure, contrast, saturation, cast) | Implemented + tested |
+| PiP frames: rounded corners and border, one `geq` for both | Implemented + tested + pixel-verified |
+| Split-screen layouts: side-by-side, stacked, three-up, grid, PiP | Implemented + tested |
+| Media manager: unused assets, per-asset size, cache clearing | Implemented |
+| Edit inside a group (double-tap to enter, breadcrumb, write-back) | Implemented + tested |
+
+Notes on the limits, plainly: shot match moves level and cast, not *look* — four
+numbers cannot carry a grade, and the sheet says so. Group edit mode swaps the
+visible timeline for the members', which is why every operation works in there
+with no special case; the whole inner session undoes as one step from outside.
 
 ## Known gaps
 
