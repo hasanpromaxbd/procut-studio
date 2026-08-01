@@ -172,6 +172,63 @@ class TimelineCompiler {
       }
     }
 
+    // Branding goes on last, over everything including adjustment layers —
+    // a watermark under a grade is a watermark that changes colour.
+    final mark = settings.watermark;
+    if (mark.isActive) {
+      final index = registerInput(
+        'watermark:${mark.imagePath}',
+        RenderInput(
+          path: mark.imagePath,
+          // `-loop 1` alone is an *infinite* stream. Bounding it with `-t` is
+          // what stops the render running forever; `shortest=1` below is the
+          // belt to this pair of braces.
+          leadingArgs: [
+            '-loop', '1',
+            '-t', TimeUtils.toFfmpegSeconds(duration),
+          ],
+          label: 'watermark',
+        ),
+      );
+
+      final scaled = graph.newLabel('wm');
+      graph
+          .chain(inputs: ['$index:v'], outputs: [scaled])
+          .then(
+            Filter('scale', {
+              'w': (outWidth * mark.scale.clamp(0.02, 1.0)).round(),
+              // -1 keeps the logo's aspect ratio; a squashed logo is worse
+              // than no logo.
+              'h': -1,
+              'flags': 'bicubic',
+            }),
+          )
+          .then(Filter('format', {'pix_fmts': 'rgba'}))
+          .then(
+            Filter('colorchannelmixer', {
+              'aa': FilterGraph.formatDouble(mark.opacity.clamp(0.0, 1.0)),
+            }),
+          );
+
+      final (wx, wy) = mark.overlayPosition(outWidth);
+      final branded = graph.newLabel('comp');
+      graph
+          .chain(inputs: [currentVideo, scaled], outputs: [branded])
+          .then(
+            // `shortest=1` is not optional here. The watermark is a looped
+            // still; with the default (0) the overlay runs until the *longest*
+            // input ends, and a looped image never does — the render simply
+            // hangs. Verified the hard way.
+            Filter('overlay', {
+              'x': wx,
+              'y': wy,
+              'format': 'auto',
+              'shortest': 1,
+            }),
+          );
+      currentVideo = branded;
+    }
+
     // A range trims the *tail* of the graph rather than the timeline, so
     // every clip's placement, speed and automation is computed exactly as it
     // would be for a full render — a range export must be a window onto the

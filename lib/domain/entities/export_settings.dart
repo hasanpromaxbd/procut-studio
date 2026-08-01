@@ -4,6 +4,7 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../../core/utils/math_utils.dart';
+import 'watermark.dart';
 
 enum ExportResolution {
   p480('480P', 854, 480),
@@ -142,6 +143,7 @@ class ExportSettings {
     this.audioSampleRate = 48000,
     this.useHardwareEncoder = true,
     this.normalizeLoudness = false,
+    this.watermark = Watermark.none,
     this.fileNameOverride,
   });
 
@@ -164,6 +166,10 @@ class ExportSettings {
   /// to anyway. Off by default: it re-levels the whole mix, and someone who
   /// balanced their audio by ear deserves to keep that balance untouched.
   final bool normalizeLoudness;
+
+  /// Branding composited over every frame. See [Watermark] for why this is a
+  /// delivery setting rather than a clip.
+  final Watermark watermark;
 
   final String? fileNameOverride;
 
@@ -234,6 +240,7 @@ class ExportSettings {
     int? audioSampleRate,
     bool? useHardwareEncoder,
     bool? normalizeLoudness,
+    Watermark? watermark,
     String? fileNameOverride,
   }) => ExportSettings(
     resolution: resolution ?? this.resolution,
@@ -249,6 +256,7 @@ class ExportSettings {
     audioSampleRate: audioSampleRate ?? this.audioSampleRate,
     useHardwareEncoder: useHardwareEncoder ?? this.useHardwareEncoder,
     normalizeLoudness: normalizeLoudness ?? this.normalizeLoudness,
+    watermark: watermark ?? this.watermark,
     fileNameOverride: fileNameOverride ?? this.fileNameOverride,
   );
 
@@ -265,6 +273,7 @@ class ExportSettings {
     'sampleRate': audioSampleRate,
     'hw': useHardwareEncoder,
     if (normalizeLoudness) 'loudnorm': true,
+    if (watermark.isActive) 'watermark': watermark.toJson(),
     if (fileNameOverride != null) 'fileName': fileNameOverride,
   };
 
@@ -283,6 +292,9 @@ class ExportSettings {
       audioSampleRate: (json['sampleRate'] as num?)?.toInt() ?? 48000,
       useHardwareEncoder: json['hw'] as bool? ?? true,
       normalizeLoudness: json['loudnorm'] as bool? ?? false,
+      watermark: Watermark.fromJson(
+        (json['watermark'] as Map?)?.cast<String, dynamic>(),
+      ),
       fileNameOverride: json['fileName'] as String?,
     );
   }

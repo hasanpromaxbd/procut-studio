@@ -9,6 +9,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dimens.dart';
 import '../../../../domain/entities/clip.dart';
 import '../../../../domain/entities/text_style_spec.dart';
+import '../../../../domain/entities/title_template.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
 
@@ -108,6 +109,35 @@ class _TextSheetState extends ConsumerState<TextSheet> {
               border: OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
+          ),
+
+          const SectionHeader(title: 'Or place a ready-made title'),
+          Text(
+            'Drops a styled, animated title at the playhead. It is an ordinary '
+            'text clip afterwards — retype it, restyle it, move it.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: Spacing.sm),
+          Wrap(
+            spacing: Spacing.sm,
+            runSpacing: Spacing.sm,
+            children: [
+              for (final template in TitleTemplate.values)
+                ActionChip(
+                  label: Text(template.label),
+                  tooltip: template.blurb,
+                  onPressed: () {
+                    ref
+                        .read(
+                          editorControllerProvider(widget.projectId).notifier,
+                        )
+                        .addTitleTemplate(template);
+                    Navigator.of(context).pop();
+                  },
+                ),
+            ],
           ),
 
           const SectionHeader(title: 'Font'),

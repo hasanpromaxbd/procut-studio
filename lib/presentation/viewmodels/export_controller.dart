@@ -15,6 +15,7 @@ import '../../domain/entities/export_preset.dart';
 import '../../domain/entities/export_range.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/project.dart';
+import '../../domain/entities/watermark.dart';
 
 final exportSettingsProvider =
     NotifierProvider<ExportSettingsController, ExportSettings>(
@@ -73,6 +74,8 @@ class ExportSettingsController extends Notifier<ExportSettings> {
       state = state.copyWith(useHardwareEncoder: value);
   void setNormalizeLoudness(bool value) =>
       state = state.copyWith(normalizeLoudness: value);
+  void setWatermark(Watermark value) =>
+      state = state.copyWith(watermark: value);
   void setFileName(String? name) =>
       state = state.copyWith(fileNameOverride: name);
 }

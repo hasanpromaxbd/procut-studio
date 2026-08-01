@@ -38,6 +38,8 @@ import '../home/templates_screen.dart';
 import 'editor_shortcuts.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/caption_sheet.dart';
+import 'sheets/chapters_sheet.dart';
+import 'sheets/curve_sheet.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/history_sheet.dart';
 import 'sheets/jump_cut_sheet.dart';
@@ -557,6 +559,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: RhythmSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.chapters:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: ChaptersSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.curves:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: CurveSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.media:
         if (!mounted) return;
         await ToolSheet.show<void>(
@@ -839,6 +855,8 @@ enum _ToolAction {
   layout,
   captions,
   media,
+  curves,
+  chapters,
   mixer,
   addTrack,
 }
@@ -978,6 +996,17 @@ class _ToolRail extends ConsumerWidget {
         label: strings.toolJumpCut,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.jumpCut),
+      ),
+      ToolIconButton(
+        icon: Icons.bookmarks_rounded,
+        label: strings.toolChapters,
+        onPressed: () => onAction(_ToolAction.chapters),
+      ),
+      ToolIconButton(
+        icon: Icons.show_chart_rounded,
+        label: strings.toolCurves,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.curves),
       ),
       ToolIconButton(
         icon: Icons.perm_media_rounded,

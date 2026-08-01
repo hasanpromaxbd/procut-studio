@@ -29,6 +29,7 @@ import '../../domain/entities/media_asset.dart';
 import '../../domain/entities/subtitle.dart';
 import '../../domain/entities/text_style_spec.dart';
 import '../../domain/entities/timeline.dart';
+import '../../domain/entities/title_template.dart';
 import '../../domain/entities/track.dart';
 import '../../domain/entities/transform2d.dart';
 import '../../domain/entities/transition.dart';
@@ -1288,6 +1289,25 @@ class EditorController extends Notifier<EditorState?> {
     );
   }
 
+  /// Reshapes one keyframe's outgoing easing — the curve editor's only edit.
+  void setKeyframeEasing(
+    String clipId,
+    TransformChannel channel,
+    Keyframe replacement,
+  ) {
+    final current = state;
+    if (current == null) return;
+    _apply(
+      TimelineOperations.setKeyframe(
+        current.timeline,
+        clipId,
+        channel,
+        replacement,
+      ),
+      'curve',
+    );
+  }
+
   // ── Layout ───────────────────────────────────────────────────────────
 
   void setLayerFrame(LayerFrame frame) => _applyToSelection(
@@ -1603,6 +1623,48 @@ class EditorController extends Notifier<EditorState?> {
         label: asset.displayName,
       ),
     };
+  }
+
+  /// Places a ready-made animated title at the playhead.
+  ///
+  /// The result is an ordinary text clip: the template only decides its
+  /// starting style, animation and motion. Nothing downstream treats it
+  /// specially, which is what makes it editable afterwards.
+  void addTitleTemplate(TitleTemplate template, {Duration? at}) {
+    final current = state;
+    if (current == null) return;
+
+    var timeline = current.timeline;
+    var track = _firstTrackOfType(timeline, TrackType.text);
+    if (track == null) {
+      timeline = TimelineOperations.addTrack(timeline, TrackType.text)
+          .getOrElse(timeline);
+      track = _firstTrackOfType(timeline, TrackType.text);
+    }
+    if (track == null) return;
+
+    final start = at ?? ref.read(playheadControllerProvider).position;
+    final clip = TextClip(
+      id: IdGenerator.textLayer(),
+      trackId: track.id,
+      start: start,
+      duration: template.defaultDuration,
+      text: template.placeholder,
+      style: template.style,
+      animationIn: template.animationIn,
+      animationOut: template.animationOut,
+      transform: template.transformFor(template.defaultDuration),
+      label: template.label,
+    );
+
+    _apply(
+      TimelineOperations.insertClip(timeline, track.id, clip, at: start),
+      'add ${template.label.toLowerCase()}',
+    );
+    state = state?.copyWith(
+      selectedClipIds: {clip.id},
+      selectedTrackId: track.id,
+    );
   }
 
   void addTextLayer(String text, {TextStyleSpec? style, Duration? at}) {

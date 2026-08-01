@@ -1855,6 +1855,83 @@ abstract final class TimelineOperations {
     return Result.ok(next);
   }
 
+  // ── Keyframe shaping ─────────────────────────────────────────────────
+
+  /// Replaces one keyframe on one transform channel, keeping the rest.
+  ///
+  /// Used by the curve editor to change a segment's easing. The keyframe is
+  /// matched by *time* rather than index: the caller is looking at a curve,
+  /// not at a list, and an index would silently address the wrong segment if
+  /// anything reordered in between.
+  static Result<Timeline> setKeyframe(
+    Timeline timeline,
+    String clipId,
+    TransformChannel channel,
+    Keyframe replacement,
+  ) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final current = _channelOf(clip.transform, channel);
+    final index = current.keyframes.indexWhere(
+      (k) => k.time == replacement.time,
+    );
+    if (index < 0) {
+      return const Result.err(
+        InvalidEditFailure('There is no keyframe at that time.'),
+      );
+    }
+
+    final updated = AnimatableDouble(
+      current.staticValue,
+      keyframes: [
+        for (final (i, k) in current.keyframes.indexed)
+          if (i == index) replacement else k,
+      ],
+    );
+
+    return Result.ok(
+      timeline.replaceTrack(
+        track.replaceClip(
+          clip.copyWithBase(
+            transform: _withChannel(clip.transform, channel, updated),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static AnimatableDouble _channelOf(
+    Transform2D transform,
+    TransformChannel channel,
+  ) => switch (channel) {
+    TransformChannel.x => transform.x,
+    TransformChannel.y => transform.y,
+    TransformChannel.scaleX => transform.scaleX,
+    TransformChannel.scaleY => transform.scaleY,
+    TransformChannel.rotation => transform.rotation,
+    TransformChannel.opacity => transform.opacity,
+  };
+
+  static Transform2D _withChannel(
+    Transform2D transform,
+    TransformChannel channel,
+    AnimatableDouble value,
+  ) => switch (channel) {
+    TransformChannel.x => transform.copyWith(x: value),
+    TransformChannel.y => transform.copyWith(y: value),
+    TransformChannel.scaleX => transform.copyWith(scaleX: value),
+    TransformChannel.scaleY => transform.copyWith(scaleY: value),
+    TransformChannel.rotation => transform.copyWith(rotation: value),
+    TransformChannel.opacity => transform.copyWith(opacity: value),
+  };
+
   // ── Captions ─────────────────────────────────────────────────────────
 
   /// Restyles every caption clip on the timeline in one edit.

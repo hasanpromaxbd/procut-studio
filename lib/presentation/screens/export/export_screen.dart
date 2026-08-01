@@ -1,6 +1,7 @@
 /// Export settings and progress.
 library;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,6 +15,7 @@ import '../../../domain/entities/export_job.dart';
 import '../../../domain/entities/export_preset.dart';
 import '../../../domain/entities/export_range.dart';
 import '../../../domain/entities/export_settings.dart';
+import '../../../domain/entities/watermark.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/export_controller.dart';
 import '../../viewmodels/export_queue_controller.dart';
@@ -338,6 +340,9 @@ class _SettingsForm extends ConsumerWidget {
             formatter: (v) => '${(v / 1000).toStringAsFixed(1)} Mbps',
             onChanged: (v) => controller.setCustomBitrate(v.round()),
           ),
+
+        const SectionHeader(title: 'Branding'),
+        _WatermarkRow(),
 
         const SectionHeader(title: 'Audio'),
         SwitchListTile(
@@ -828,6 +833,112 @@ class _RangeRow extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Optional branding over every exported frame.
+class _WatermarkRow extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(exportSettingsProvider);
+    final controller = ref.read(exportSettingsProvider.notifier);
+    final mark = settings.watermark;
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                mark.isActive
+                    ? mark.imagePath.split('/').last
+                    : 'No watermark — the frame goes out clean',
+                style: theme.textTheme.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (mark.isActive)
+              TextButton(
+                onPressed: () =>
+                    controller.setWatermark(mark.copyWith(clearImage: true)),
+                child: const Text('Remove'),
+              ),
+            TextButton(
+              onPressed: () async {
+                final picked = await FilePicker.pickFiles(
+                  type: FileType.image,
+                  allowMultiple: false,
+                );
+                final path = picked?.files.firstOrNull?.path;
+                if (path != null) {
+                  controller.setWatermark(mark.copyWith(imagePath: path));
+                }
+              },
+              child: Text(mark.isActive ? 'Change' : 'Choose image'),
+            ),
+          ],
+        ),
+        if (mark.isActive) ...[
+          Wrap(
+            spacing: Spacing.xs,
+            children: [
+              for (final corner in WatermarkCorner.values)
+                ChoiceChip(
+                  visualDensity: VisualDensity.compact,
+                  selected: mark.corner == corner,
+                  label: Text(corner.label),
+                  onSelected: (_) =>
+                      controller.setWatermark(mark.copyWith(corner: corner)),
+                ),
+            ],
+          ),
+          Row(
+            children: [
+              SizedBox(
+                width: 60,
+                child: Text('Size', style: theme.textTheme.bodySmall),
+              ),
+              Expanded(
+                child: Slider(
+                  value: mark.scale.clamp(0.04, 0.5),
+                  min: 0.04,
+                  max: 0.5,
+                  onChanged: (v) =>
+                      controller.setWatermark(mark.copyWith(scale: v)),
+                ),
+              ),
+              Text(
+                '${(mark.scale * 100).round()}%',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              SizedBox(
+                width: 60,
+                child: Text('Opacity', style: theme.textTheme.bodySmall),
+              ),
+              Expanded(
+                child: Slider(
+                  value: mark.opacity.clamp(0.05, 1),
+                  min: 0.05,
+                  onChanged: (v) =>
+                      controller.setWatermark(mark.copyWith(opacity: v)),
+                ),
+              ),
+              Text(
+                '${(mark.opacity * 100).round()}%',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
