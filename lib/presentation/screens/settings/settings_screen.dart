@@ -20,6 +20,7 @@ import '../../viewmodels/ai_settings_controller.dart';
 import '../../viewmodels/bdrive_controller.dart';
 import '../../viewmodels/preview_prefs.dart';
 import '../../widgets/common/glass_panel.dart';
+import '../editor/first_run_tour.dart';
 
 final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(
   ThemeModeController.new,
@@ -219,6 +220,22 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const _CrashScreen()),
+            ),
+          ),
+
+          SectionHeader(title: 'Help'),
+          Consumer(
+            builder: (context, ref, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.school_outlined),
+              title: const Text('Show the tour again'),
+              subtitle: const Text('Next time you open a project'),
+              onTap: () {
+                ref.read(tourSeenProvider.notifier).reset();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('The tour will show again')),
+                );
+              },
             ),
           ),
 

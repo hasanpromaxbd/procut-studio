@@ -13,9 +13,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_dimens.dart';
 import '../../../../domain/entities/layer_frame.dart';
+import '../../../../domain/entities/transform2d.dart';
 import '../../../../domain/usecases/timeline_operations.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
+
+String _blendLabel(LayerBlendMode mode) => switch (mode) {
+  LayerBlendMode.normal => 'Normal',
+  LayerBlendMode.multiply => 'Multiply',
+  LayerBlendMode.screen => 'Screen',
+  LayerBlendMode.overlay => 'Overlay',
+  LayerBlendMode.darken => 'Darken',
+  LayerBlendMode.lighten => 'Lighten',
+  LayerBlendMode.difference => 'Difference',
+  LayerBlendMode.addition => 'Add',
+};
 
 class LayoutSheet extends ConsumerWidget {
   const LayoutSheet({required this.projectId, super.key});
@@ -115,6 +127,31 @@ class LayoutSheet extends ConsumerWidget {
               ),
             ),
           ],
+
+          const SectionHeader(title: 'Blending'),
+          Wrap(
+            spacing: Spacing.xs,
+            runSpacing: Spacing.xs,
+            children: [
+              for (final mode in LayerBlendMode.values)
+                ChoiceChip(
+                  selected:
+                      (transform?.blendMode ?? LayerBlendMode.normal) == mode,
+                  label: Text(_blendLabel(mode)),
+                  onSelected: selected.isEmpty
+                      ? null
+                      : (_) => controller.setBlendMode(mode),
+                ),
+            ],
+          ),
+          const SizedBox(height: Spacing.xs),
+          Text(
+            'How this layer mixes with what is beneath it. Only the pixels '
+            'the layer covers are affected.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
 
           const SectionHeader(title: 'Edges'),
           _Nudge(

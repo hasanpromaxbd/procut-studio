@@ -5,10 +5,10 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 381 tests passing, debug and release
+Verified state: `flutter analyze` clean, 395 tests passing, debug and release
 APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh`, `tool/verify_ducking.sh`
-and `tool/verify_placement.sh` all pass against real impellerc/ffmpeg
-binaries.
+`tool/verify_placement.sh` and `tool/verify_speed_ramp.sh` all pass against
+real impellerc/ffmpeg binaries.
 
 ---
 
@@ -365,6 +365,41 @@ than guesses when the match is weak. Pre-render *planning* is implemented and
 tested; the rendering it would trigger reuses range export. Mask animation
 interpolates linearly between keyframes rather than following each keyframe's
 own easing curve, because the FFmpeg evaluator has no smoothstep.
+
+## Sixth wave (July 2026)
+
+| Fix | Status |
+|---|---|
+| Speed ramps actually ramp on export (rendered at one constant speed) | Fixed + tested + verified in pixels |
+| Ramped audio follows the same curve (would have drifted from the picture) | Fixed + tested |
+| Blend modes exist at all (model-only: no preview, no export) | Fixed + tested |
+| Transition easing does something (a field nothing read) | Fixed |
+| Pre-render planning is reachable (the planner was dead code) | Fixed |
+
+The ramp was the worst of these: a comment described the segmenting it was
+not doing, and a warning told the user about stepping that could not occur.
+It now renders as sixteen constant-rate pieces, picture and sound cut at the
+same boundaries so they cannot drift. `tool/verify_speed_ramp.sh` measures
+4.3× more motion by the end of a 1×→4× ramp and both streams landing on the
+clip's stated length.
+
+Blend modes needed the alpha-aware chain — `blend` ignores alpha, so on its
+own it mixes the transparent surround too, and `multiply` blacks out the
+frame. Blend, reattach the layer's alpha, then overlay.
+
+Transition easing applies to the four expression-based transitions, which
+compute their own progress. The six native `xfade` ones advance linearly
+inside FFmpeg with no way to change it, and the sheet says so rather than
+offering a control that does nothing.
+
+| Feature | Status |
+|---|---|
+| Freeze-and-push hero moment | Implemented |
+| Audio-reactive pulse on beats, written as keyframes | Implemented |
+| Project search on the home screen | Implemented |
+| Saved export presets | Implemented |
+| A-B compare (hold to see it ungraded) | Implemented |
+| First-run tour, replayable from Settings | Implemented |
 
 ## Known gaps
 

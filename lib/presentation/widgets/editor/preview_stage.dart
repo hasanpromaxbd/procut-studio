@@ -44,6 +44,7 @@ import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
 import '../../viewmodels/preview_prefs.dart';
+import 'blend_layer.dart';
 import 'guides_overlay.dart';
 
 /// Above this many simultaneous video layers we stop creating decoders.
@@ -78,6 +79,8 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
     final editor = ref.watch(editorControllerProvider(widget.projectId));
     final playhead = ref.watch(playheadControllerProvider);
     final eyedropper = ref.watch(eyedropperProvider);
+    // Watched so flipping the compare repaints the stage.
+    ref.watch(bypassEffectsProvider);
 
     if (editor == null) {
       return const ColoredBox(color: Colors.black);
@@ -232,6 +235,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
 
     content = _applyEffects(content, clip, local);
     content = _applyFrame(content, clip, canvasSize, transform);
+    if (clip.transform.blendMode != LayerBlendMode.normal) {
+      content = BlendLayer(mode: clip.transform.blendMode, child: content);
+    }
 
     return Opacity(
       opacity: transform.opacity.clamp(0.0, 1.0),
@@ -306,6 +312,9 @@ class _PreviewStageState extends ConsumerState<PreviewStage> {
   /// Each is a real GPU pass, so effects stack in the same order the exporter
   /// applies its filters (colour → stylise → texture, via `activeEffects`).
   Widget _applyEffects(Widget child, Clip clip, Duration local) {
+    // A-B compare: show the picture as shot, with every effect and grade off.
+    if (ref.read(bypassEffectsProvider)) return child;
+
     final effects = clip.activeEffects;
     if (effects.isEmpty) return child;
 

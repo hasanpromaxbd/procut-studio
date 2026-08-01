@@ -1371,6 +1371,15 @@ class EditorController extends Notifier<EditorState?> {
     'layer position',
   );
 
+  void setBlendMode(LayerBlendMode mode) => _applyToSelection(
+    (timeline, clipId) => _mapTransform(
+      timeline,
+      clipId,
+      (t) => t.copyWith(blendMode: mode),
+    ),
+    'blend mode',
+  );
+
   void resetLayerPlacement() => _applyToSelection(
     (timeline, clipId) => _mapTransform(
       timeline,
@@ -1424,6 +1433,54 @@ class EditorController extends Notifier<EditorState?> {
   // ── Ken Burns ────────────────────────────────────────────────────────
 
   /// Adds a slow camera move to the selected stills.
+  /// Pulses the selection on every beat marker.
+  int pulseOnBeats({double amount = 0.06}) {
+    final current = state;
+    if (current == null || !current.hasSelection) return 0;
+
+    final beats = current.timeline.markers
+        .where((m) => m.kind == MarkerKind.beat)
+        .map((m) => m.time)
+        .toList();
+    if (beats.isEmpty) {
+      state = current.copyWith(
+        errorMessage: 'Detect beats first — there are no beat markers.',
+      );
+      return 0;
+    }
+
+    _applyToSelection(
+      (timeline, clipId) => TimelineOperations.pulseOnBeats(
+        timeline,
+        clipId,
+        beats,
+        amount: amount,
+      ),
+      'pulse on beats',
+    );
+    return beats.length;
+  }
+
+  /// Freeze the frame under the playhead and push into it.
+  void heroMoment({
+    Duration hold = const Duration(seconds: 2),
+    double zoom = 0.22,
+  }) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null) return;
+    _apply(
+      TimelineOperations.heroMoment(
+        current.timeline,
+        clipId,
+        ref.read(playheadControllerProvider).position,
+        hold: hold,
+        zoom: zoom,
+      ),
+      'hero moment',
+    );
+  }
+
   void applyKenBurns({
     KenBurnsMove move = KenBurnsMove.zoomIn,
     double zoom = 0.18,
@@ -1521,7 +1578,12 @@ class EditorController extends Notifier<EditorState?> {
     );
   }
 
-  void setTransition(String clipId, TransitionType type, {Duration? duration}) {
+  void setTransition(
+    String clipId,
+    TransitionType type, {
+    Duration? duration,
+    Easing? easing,
+  }) {
     final current = state;
     if (current == null) return;
     if (type == TransitionType.none) {
@@ -1539,6 +1601,7 @@ class EditorController extends Notifier<EditorState?> {
           id: IdGenerator.transition(),
           type: type,
           duration: duration ?? AppConstants.defaultTransitionDuration,
+          easing: easing ?? Easing.easeInOut,
         ),
       ),
       'add transition',

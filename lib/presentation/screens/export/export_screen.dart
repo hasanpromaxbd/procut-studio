@@ -1,6 +1,8 @@
 /// Export settings and progress.
 library;
 
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +22,7 @@ import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/export_controller.dart';
 import '../../viewmodels/export_queue_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
+import '../../viewmodels/saved_presets_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 
 class ExportScreen extends ConsumerStatefulWidget {
@@ -340,6 +343,9 @@ class _SettingsForm extends ConsumerWidget {
             formatter: (v) => '${(v / 1000).toStringAsFixed(1)} Mbps',
             onChanged: (v) => controller.setCustomBitrate(v.round()),
           ),
+
+        const SectionHeader(title: 'Your presets'),
+        _SavedPresets(),
 
         const SectionHeader(title: 'Branding'),
         _WatermarkRow(),
@@ -940,5 +946,87 @@ class _WatermarkRow extends ConsumerWidget {
         ],
       ],
     );
+  }
+}
+
+
+/// Save the current settings under a name, and apply them again later.
+class _SavedPresets extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final presets = ref.watch(savedPresetsProvider);
+    final settings = ref.watch(exportSettingsProvider);
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (presets.isEmpty)
+          Text(
+            'Save the settings you keep re-picking, and they are one tap next '
+            'time.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          )
+        else
+          Wrap(
+            spacing: Spacing.sm,
+            runSpacing: Spacing.sm,
+            children: [
+              for (final preset in presets)
+                InputChip(
+                  label: Text(preset.name),
+                  onPressed: () => ref
+                      .read(exportSettingsProvider.notifier)
+                      .replace(preset.settings),
+                  onDeleted: () =>
+                      ref.read(savedPresetsProvider.notifier).remove(preset.name),
+                ),
+            ],
+          ),
+        const SizedBox(height: Spacing.sm),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => unawaited(_promptSave(context, ref, settings)),
+            icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+            label: const Text('Save these settings'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _promptSave(
+    BuildContext context,
+    WidgetRef ref,
+    ExportSettings settings,
+  ) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Name this preset'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'My YouTube settings'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (name != null && name.trim().isNotEmpty) {
+      ref.read(savedPresetsProvider.notifier).save(name, settings);
+    }
   }
 }

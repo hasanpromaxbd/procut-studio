@@ -16,8 +16,9 @@
 /// but that is the user's call to make.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Easing;
 
+import '../../domain/entities/keyframe.dart';
 import '../../domain/entities/transition.dart';
 import '../ffmpeg/filter_graph.dart';
 
@@ -206,7 +207,7 @@ abstract final class TransitionCatalog {
     if (useCustom) {
       return Filter('xfade', {
         'transition': 'custom',
-        'expr': spec.customExpression!(transition),
+        'expr': _eased(spec.customExpression!(transition), transition.easing),
         'duration': FilterGraph.formatDouble(durationSeconds),
         'offset': FilterGraph.formatDouble(offsetSeconds),
       });
@@ -218,6 +219,45 @@ abstract final class TransitionCatalog {
       'offset': FilterGraph.formatDouble(offsetSeconds),
     });
   }
+
+  /// Whether [type] can honour an easing curve at all.
+  ///
+  /// Only the expression-based transitions can: they compute progress
+  /// themselves, so the curve can be substituted in. `xfade`'s built-in
+  /// transitions advance linearly inside FFmpeg and expose no way to change
+  /// that, so offering the control for them would be a lie.
+  static bool supportsEasing(TransitionType type) =>
+      _specs[type]?.customExpression != null;
+
+  /// Rewrites a custom expression to advance on an eased curve.
+  ///
+  /// The expression's progress variable is `P`, 0 at the start of the
+  /// transition and 1 at its end. Substituting an eased function of `P` for
+  /// every occurrence bends the whole transition without the expression
+  /// builders needing to know about easing at all.
+  static String _eased(String expression, Easing easing) {
+    final curve = _progressExpression(easing);
+    if (curve == 'P') return expression;
+    // Single-letter variables (X, Y, W, H, P, A, B), so a word boundary is an
+    // exact match — nothing else in these expressions is a bare `P`.
+    return expression.replaceAll(RegExp(r'\bP\b'), '($curve)');
+  }
+
+  static String _progressExpression(Easing easing) => switch (easing) {
+    Easing.linear => 'P',
+    // A transition that holds is a cut with extra steps; there is nothing
+    // sensible to hold *at*, so it advances linearly.
+    Easing.hold => 'P',
+    Easing.easeIn => '(P*P)',
+    Easing.easeOut => '(1-(1-P)*(1-P))',
+    Easing.easeInOut => '(P*P*(3-2*P))',
+    // The standard back-ease overshoot constant.
+    Easing.back => '(P*P*(2.70158*P-1.70158))',
+    // A cubic bézier's y at a given x has no closed form, and solving it per
+    // pixel is not an option. Smoothstep is the closest fixed curve, and the
+    // sheet says a custom curve falls back to it.
+    Easing.custom => '(P*P*(3-2*P))',
+  };
 
   /// True when rendering [transition] exactly will be materially slow.
   static bool isExpensive(Transition transition) =>

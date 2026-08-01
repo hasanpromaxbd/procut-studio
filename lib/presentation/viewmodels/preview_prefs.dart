@@ -45,3 +45,22 @@ class PreviewQualityController extends Notifier<PreviewQuality> {
     );
   }
 }
+
+
+/// Whether the preview is showing the ungraded picture.
+///
+/// Held rather than toggled: comparing means flicking back and forth, and a
+/// press-and-hold reads as "show me the before" far better than a switch you
+/// have to remember to turn off — a forgotten switch looks like the grade
+/// stopped working.
+final bypassEffectsProvider =
+    NotifierProvider<BypassEffectsController, bool>(
+      BypassEffectsController.new,
+    );
+
+class BypassEffectsController extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set({required bool bypassed}) => state = bypassed;
+}

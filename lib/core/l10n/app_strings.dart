@@ -91,6 +91,7 @@ abstract class AppStrings {
   String get toolChapters;
   String get toolAudioDetail;
   String get toolMulticam;
+  String get toolPrerender;
 
   // ── Export ───────────────────────────────────────────────────────────
   String get startExport;
@@ -237,6 +238,8 @@ class AppStringsEn extends AppStrings {
   String get toolAudioDetail => 'Audio';
   @override
   String get toolMulticam => 'Multicam';
+  @override
+  String get toolPrerender => 'Smooth';
 
   @override
   String get startExport => 'Start export';
@@ -403,6 +406,8 @@ class AppStringsBn extends AppStrings {
   String get toolAudioDetail => 'অডিও';
   @override
   String get toolMulticam => 'মাল্টিক্যাম';
+  @override
+  String get toolPrerender => 'স্মুথ';
 
   @override
   String get startExport => 'এক্সপোর্ট শুরু করুন';

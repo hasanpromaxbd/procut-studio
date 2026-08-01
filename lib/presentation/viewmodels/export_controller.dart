@@ -72,6 +72,9 @@ class ExportSettingsController extends Notifier<ExportSettings> {
       state = state.copyWith(audioBitrateKbps: kbps);
   void setHardwareEncoding(bool value) =>
       state = state.copyWith(useHardwareEncoder: value);
+  /// Replaces every setting at once — how a saved preset is applied.
+  void replace(ExportSettings settings) => state = settings;
+
   void setNormalizeLoudness(bool value) =>
       state = state.copyWith(normalizeLoudness: value);
   void setWatermark(Watermark value) =>

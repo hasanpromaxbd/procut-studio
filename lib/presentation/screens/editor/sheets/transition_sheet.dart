@@ -1,15 +1,26 @@
 /// Transition picker for the join after the selected clip.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_dimens.dart';
+import '../../../../domain/entities/keyframe.dart';
 import '../../../../domain/entities/transition.dart';
 import '../../../../engine/transitions/transition_catalog.dart';
 import '../../../viewmodels/editor_controller.dart';
 import '../../../widgets/common/glass_panel.dart';
+
+String _easingLabel(Easing easing) => switch (easing) {
+  Easing.linear => 'Linear',
+  Easing.easeIn => 'Ease in',
+  Easing.easeOut => 'Ease out',
+  Easing.easeInOut => 'Ease both',
+  Easing.back => 'Overshoot',
+  Easing.hold => 'Hold',
+  Easing.custom => 'Custom',
+};
 
 class TransitionSheet extends ConsumerStatefulWidget {
   const TransitionSheet({required this.projectId, super.key});
@@ -109,6 +120,47 @@ class _TransitionSheetState extends ConsumerState<TransitionSheet> {
               }
             },
           ),
+          const SectionHeader(title: 'Curve'),
+          if (current == null || !current.isActive)
+            Text(
+              'Pick a transition first.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          else if (!TransitionCatalog.supportsEasing(current.type))
+            Text(
+              '${current.type.id} advances at a fixed rate inside FFmpeg, so '
+              'it has no curve to shape. Spin, warp, ripple and glitch do.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          else
+            Wrap(
+              spacing: Spacing.xs,
+              runSpacing: Spacing.xs,
+              children: [
+                for (final easing in const [
+                  Easing.linear,
+                  Easing.easeIn,
+                  Easing.easeOut,
+                  Easing.easeInOut,
+                  Easing.back,
+                ])
+                  ChoiceChip(
+                    selected: current.easing == easing,
+                    label: Text(_easingLabel(easing)),
+                    onSelected: (_) => controller.setTransition(
+                      clip.id,
+                      current.type,
+                      duration: current.duration,
+                      easing: easing,
+                    ),
+                  ),
+              ],
+            ),
+
           if (current != null && TransitionCatalog.isExpensive(current))
             Card(
               color: theme.colorScheme.surfaceContainerHigh,

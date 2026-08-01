@@ -32,8 +32,25 @@ class ProjectSortController extends Notifier<ProjectSort> {
 }
 
 /// Live project list, re-emitted whenever anything is saved or deleted.
+/// What the user has typed into the home screen's search box.
+///
+/// Deliberately not persisted: a filter still applied next time you open the
+/// app looks exactly like half your projects having vanished.
+final projectQueryProvider = NotifierProvider<ProjectQueryController, String>(
+  ProjectQueryController.new,
+);
+
+class ProjectQueryController extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void set(String value) => state = value;
+  void clear() => state = '';
+}
+
 final projectListProvider = StreamProvider<List<ProjectSummary>>((ref) {
   final sort = ref.watch(projectSortProvider);
+  final query = ref.watch(projectQueryProvider).trim().toLowerCase();
   return ref.watch(projectRepositoryProvider).watchSummaries().map((projects) {
     final sorted = List<ProjectSummary>.of(projects);
     switch (sort) {
@@ -46,7 +63,14 @@ final projectListProvider = StreamProvider<List<ProjectSummary>>((ref) {
       case ProjectSort.duration:
         sorted.sort((a, b) => b.duration.compareTo(a.duration));
     }
-    return sorted;
+    if (query.isEmpty) return sorted;
+    // Matching on every word separately means "beach 4k" finds "4K beach
+    // edit" — people rarely remember the exact order of their own titles.
+    final terms = query.split(RegExp(r'\s+'));
+    return sorted.where((project) {
+      final haystack = project.name.toLowerCase();
+      return terms.every(haystack.contains);
+    }).toList();
   });
 });
 

@@ -112,6 +112,28 @@ class _MotionSheetState extends ConsumerState<MotionSheet> {
             ],
           ),
 
+          const SectionHeader(title: 'Hero moment'),
+          Text(
+            'Freezes the frame under the playhead and pushes into it — the '
+            '"hold on this" beat, in one action.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: Spacing.sm),
+          FilledButton.tonalIcon(
+            onPressed: selected.isEmpty
+                ? null
+                : () {
+                    ref
+                        .read(
+                          editorControllerProvider(widget.projectId).notifier,
+                        )
+                        .heroMoment(zoom: _zoom);
+                    unawaited(HapticFeedback.mediumImpact());
+                  },
+            icon: const Icon(Icons.ac_unit_rounded),
+            label: const Text('Freeze and push'),
+          ),
+
           if (animated > 0) ...[
             const SizedBox(height: Spacing.sm),
             Text(

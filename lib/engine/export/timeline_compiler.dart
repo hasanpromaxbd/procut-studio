@@ -109,6 +109,11 @@ class TimelineCompiler {
 
     // ── 2. Visual tracks, bottom to top ──────────────────────────────
     final trackLabels = <String>[];
+    // A track composites with the blend mode of the clips on it. Per-track
+    // rather than per-clip because compositing happens after each track has
+    // been assembled into one stream — and a track whose clips disagree about
+    // blending is not a thing an editor can express anyway.
+    final trackBlendModes = <LayerBlendMode>[];
     for (final track in timeline.visualTracks) {
       if (track.isEmpty) continue;
       // Adjustment tracks carry no picture of their own — they are applied to
@@ -131,17 +136,19 @@ class TimelineCompiler {
         warnings: warnings,
         preferFastTransitions: preferFastTransitions,
       );
-      if (label != null) trackLabels.add(label);
+      if (label != null) {
+        trackLabels.add(label);
+        trackBlendModes.add(_blendModeOf(track));
+      }
     }
 
     // ── 3. Composite ─────────────────────────────────────────────────
     var currentVideo = baseLabel;
-    for (final trackLabel in trackLabels) {
-      final next = graph.newLabel('comp');
-      graph
-          .chain(inputs: [currentVideo, trackLabel], outputs: [next])
-          .then(Filters.overlay(x: '0', y: '0', format: 'auto'));
-      currentVideo = next;
+    for (final (index, trackLabel) in trackLabels.indexed) {
+      final mode = trackBlendModes[index];
+      currentVideo = mode == LayerBlendMode.normal
+          ? _overlayTrack(graph, currentVideo, trackLabel)
+          : _blendTrack(graph, currentVideo, trackLabel, mode);
     }
 
     // ── 3b. Adjustment layers ────────────────────────────────────────
@@ -606,33 +613,37 @@ class TimelineCompiler {
           RenderInput(path: effectivePath, label: 'media:$effectivePath'),
         );
 
-        final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
-
-        if (clip.isFrozen) {
-          chain.thenAll(
-            Filters.freezeFrame(clip.freezeFrameAt!, clip.duration, fps),
+        // A ramp is built from its own sub-chains and arrives already
+        // re-timed; everything else starts from one chain off the input.
+        final FilterChain chain;
+        if (!clip.isFrozen && clip.hasSpeedRamp) {
+          final ramped = _rampedVideo(
+            graph: graph,
+            clip: clip,
+            inputPad: '$index:v',
+            sourceIn: effectiveIn,
+            warnings: warnings,
           );
+          chain = graph.chain(inputs: [ramped], outputs: [label]);
         } else {
-          chain
-              .then(
-                Filters.trim(
-                  effectiveIn,
-                  effectiveIn + clip.sourceDuration,
-                ),
-              )
-              .then(Filters.resetPts());
-          if (clip.hasSpeedRamp) {
-            // `setpts` cannot express the integral of an arbitrary eased
-            // curve, so the ramp is approximated by constant-rate segments.
-            // 24 is smooth to the eye and keeps the graph manageable; more
-            // segments cost graph size, not quality, past this point.
-            warnings.add(
-              'A speed ramp is rendered as stepped segments; very long ramps '
-              'may show slight stepping.',
+          chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
+
+          if (clip.isFrozen) {
+            chain.thenAll(
+              Filters.freezeFrame(clip.freezeFrameAt!, clip.duration, fps),
             );
-            chain.then(Filters.videoSpeed(clip.speed));
-          } else if (clip.isSpeedAltered) {
-            chain.then(Filters.videoSpeed(clip.speed));
+          } else {
+            chain
+                .then(
+                  Filters.trim(
+                    effectiveIn,
+                    effectiveIn + clip.sourceDuration,
+                  ),
+                )
+                .then(Filters.resetPts());
+            if (clip.isSpeedAltered) {
+              chain.then(Filters.videoSpeed(clip.speed));
+            }
           }
         }
 
@@ -989,6 +1000,219 @@ class TimelineCompiler {
   /// Endpoints only: a hand-built multi-keyframe move on a still is
   /// approximated by its first and last values, and says so, rather than
   /// silently freezing the way the static path did.
+  /// How many constant-rate pieces a ramp is cut into.
+  ///
+  /// `setpts` takes one multiplier for a whole stream, so an arbitrary eased
+  /// curve cannot be expressed directly — it has to be approximated by
+  /// pieces. Sixteen is where the stepping stops being visible on the ramps
+  /// people actually build; more pieces cost graph size and encoder
+  /// start-ups, not smoothness.
+  static const int _rampSegments = 16;
+
+  /// The source window and playback rate of each piece of a ramp.
+  ///
+  /// Split by *timeline* time and converted to source time through
+  /// `integrateSpeed`, so the pieces butt together exactly and the clip still
+  /// consumes precisely the source it says it does. Splitting by source time
+  /// instead would drift against the clip's own duration maths.
+  static List<({Duration sourceStart, Duration sourceEnd, double rate})>
+  rampSegments(MediaClip clip, Duration sourceIn) {
+    final segments =
+        <({Duration sourceStart, Duration sourceEnd, double rate})>[];
+    final total = clip.duration;
+    if (total <= Duration.zero) return segments;
+
+    for (var i = 0; i < _rampSegments; i++) {
+      final from = Duration(
+        microseconds: total.inMicroseconds * i ~/ _rampSegments,
+      );
+      final to = Duration(
+        microseconds: total.inMicroseconds * (i + 1) ~/ _rampSegments,
+      );
+      final span = to - from;
+      if (span <= Duration.zero) continue;
+
+      final consumedBefore = clip.integrateSpeed(Duration.zero, from);
+      final consumed = clip.integrateSpeed(from, to);
+      if (consumed <= Duration.zero) continue;
+
+      segments.add((
+        sourceStart: sourceIn + consumedBefore,
+        sourceEnd: sourceIn + consumedBefore + consumed,
+        // The average rate over this piece: source consumed per second of
+        // timeline.
+        rate: consumed.inMicroseconds / span.inMicroseconds,
+      ));
+    }
+    return segments;
+  }
+
+  /// Builds the video side of a ramp and returns its output label.
+  String _rampedVideo({
+    required FilterGraph graph,
+    required VideoClip clip,
+    required String inputPad,
+    required Duration sourceIn,
+    required List<String> warnings,
+  }) {
+    final segments = rampSegments(clip, sourceIn);
+    if (segments.isEmpty) {
+      final passthrough = graph.newLabel('ramp');
+      graph
+          .chain(inputs: [inputPad], outputs: [passthrough])
+          .then(Filters.trim(sourceIn, sourceIn + clip.sourceDuration))
+          .then(Filters.resetPts());
+      return passthrough;
+    }
+
+    // One `split` feeding every piece: the source is decoded once and each
+    // piece trims its own window out of it.
+    final branches = [
+      for (var i = 0; i < segments.length; i++) graph.newLabel('rin'),
+    ];
+    graph
+        .chain(inputs: [inputPad], outputs: branches)
+        .then(Filter('split')..arg('${branches.length}'));
+
+    final pieces = <String>[];
+    for (var i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final piece = graph.newLabel('rseg');
+      graph
+          .chain(inputs: [branches[i]], outputs: [piece])
+          .then(Filters.trim(segment.sourceStart, segment.sourceEnd))
+          .then(Filters.resetPts())
+          .then(Filters.videoSpeed(segment.rate));
+      pieces.add(piece);
+    }
+
+    final joined = graph.newLabel('ramp');
+    graph
+        .chain(inputs: pieces, outputs: [joined])
+        .then(Filter('concat', {'n': pieces.length, 'v': 1, 'a': 0}))
+        .then(Filters.resetPts());
+
+    warnings.add(
+      'A speed ramp is rendered as ${pieces.length} constant-rate segments; '
+      'a very long ramp may show slight stepping.',
+    );
+    return joined;
+  }
+
+  /// Builds the audio side of a ramp and returns its output label.
+  ///
+  /// Same segmentation as the picture, from the same [rampSegments], so the
+  /// two cannot drift apart: every piece covers the same source window and is
+  /// stretched by the same factor.
+  String _rampedAudio({
+    required FilterGraph graph,
+    required MediaClip clip,
+    required String inputPad,
+    required Duration sourceIn,
+  }) {
+    final segments = rampSegments(clip, sourceIn);
+    if (segments.isEmpty) {
+      final passthrough = graph.newLabel('aramp');
+      graph
+          .chain(inputs: [inputPad], outputs: [passthrough])
+          .then(Filters.atrim(sourceIn, sourceIn + clip.sourceDuration))
+          .then(Filters.resetAudioPts());
+      return passthrough;
+    }
+
+    final branches = [
+      for (var i = 0; i < segments.length; i++) graph.newLabel('arin'),
+    ];
+    graph
+        .chain(inputs: [inputPad], outputs: branches)
+        .then(Filter('asplit')..arg('${branches.length}'));
+
+    final pieces = <String>[];
+    for (var i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      final piece = graph.newLabel('arseg');
+      graph
+          .chain(inputs: [branches[i]], outputs: [piece])
+          .then(Filters.atrim(segment.sourceStart, segment.sourceEnd))
+          .then(Filters.resetAudioPts())
+          // `atempo` caps at 2× per instance, so a steep ramp cascades —
+          // `audioSpeed` already handles that decomposition.
+          .thenAll(Filters.audioSpeed(segment.rate));
+      pieces.add(piece);
+    }
+
+    final joined = graph.newLabel('aramp');
+    graph
+        .chain(inputs: pieces, outputs: [joined])
+        .then(Filter('concat', {'n': pieces.length, 'v': 0, 'a': 1}))
+        .then(Filters.resetAudioPts());
+    return joined;
+  }
+
+  /// The blend mode a track composites with: the first its clips agree on.
+  static LayerBlendMode _blendModeOf(Track track) {
+    for (final clip in track.clips) {
+      if (clip.enabled && clip.transform.blendMode != LayerBlendMode.normal) {
+        return clip.transform.blendMode;
+      }
+    }
+    return LayerBlendMode.normal;
+  }
+
+  String _overlayTrack(FilterGraph graph, String base, String layer) {
+    final next = graph.newLabel('comp');
+    graph
+        .chain(inputs: [base, layer], outputs: [next])
+        .then(Filters.overlay(x: '0', y: '0', format: 'auto'));
+    return next;
+  }
+
+  /// Composites [layer] onto [base] with a blend mode, honouring alpha.
+  ///
+  /// `blend` combines two whole frames and ignores alpha entirely, so used on
+  /// its own it blends the transparent surround as well — every pixel the
+  /// layer does not cover gets mixed with black. Whether that is visible
+  /// depends on the mode (`screen` with black is a no-op; `multiply` blacks
+  /// the frame out), which is exactly the kind of bug that ships.
+  ///
+  /// So: blend the frames, reattach the layer's own alpha to the result, and
+  /// overlay that. Only the pixels the layer actually covers are affected.
+  String _blendTrack(
+    FilterGraph graph,
+    String base,
+    String layer,
+    LayerBlendMode mode,
+  ) {
+    final baseForBlend = graph.newLabel('bb');
+    final baseForOver = graph.newLabel('bo');
+    graph
+        .chain(inputs: [base], outputs: [baseForBlend, baseForOver])
+        .then(Filter('split')..arg('2'));
+
+    final layerRgb = graph.newLabel('lb');
+    final layerAlpha = graph.newLabel('la');
+    graph
+        .chain(inputs: [layer], outputs: [layerRgb, layerAlpha])
+        .then(Filter('split')..arg('2'));
+
+    final mask = graph.newLabel('lmask');
+    graph
+        .chain(inputs: [layerAlpha], outputs: [mask])
+        .then(Filter('alphaextract'));
+
+    final blended = graph.newLabel('bl');
+    graph
+        .chain(inputs: [baseForBlend, layerRgb], outputs: [blended])
+        .then(Filters.blend(mode.id));
+
+    final masked = graph.newLabel('blm');
+    graph
+        .chain(inputs: [blended, mask], outputs: [masked])
+        .then(Filter('alphamerge'));
+
+    return _overlayTrack(graph, baseForOver, masked);
+  }
+
   /// Renders an animated transform through `zoompan`.
   ///
   /// Applies to video as well as stills: `zoompan` at `d=1` emits one frame
@@ -1398,6 +1622,7 @@ class TimelineCompiler {
             equalizer: clip.equalizer,
             reversed: clip.reversed,
             voiceEffect: clip.voiceEffect,
+            rampClip: clip.hasSpeedRamp ? clip : null,
           ),
           VideoClip() when !clip.muted && !clip.isFrozen => _AudioSource(
             assetId: clip.assetId,
@@ -1414,6 +1639,7 @@ class TimelineCompiler {
             equalizer: null,
             reversed: clip.reversed,
             voiceEffect: VoiceEffect.none,
+            rampClip: clip.hasSpeedRamp ? clip : null,
           ),
           _ => null,
         };
@@ -1428,20 +1654,36 @@ class TimelineCompiler {
         );
 
         final label = graph.newLabel('a');
-        final chain = graph.chain(inputs: ['$index:a'], outputs: [label]);
+        final FilterChain chain;
 
-        chain
-            .then(
-              Filters.atrim(
-                source.sourceIn,
-                source.sourceIn + source.sourceDuration,
-              ),
-            )
-            .then(Filters.resetAudioPts());
+        if (source.hasRamp) {
+          // Re-timed in pieces upstream; what arrives here is already at the
+          // clip's timeline length, so the shared speed handling below must
+          // not touch it again.
+          final ramped = _rampedAudio(
+            graph: graph,
+            clip: source.rampClip!,
+            inputPad: '$index:a',
+            sourceIn: source.sourceIn,
+          );
+          chain = graph.chain(inputs: [ramped], outputs: [label]);
+        } else {
+          chain = graph.chain(inputs: ['$index:a'], outputs: [label]);
+          chain
+              .then(
+                Filters.atrim(
+                  source.sourceIn,
+                  source.sourceIn + source.sourceDuration,
+                ),
+              )
+              .then(Filters.resetAudioPts());
+        }
 
-        if (source.reversed) chain.then(Filters.reverseAudio());
+        if (source.reversed && !source.hasRamp) {
+          chain.then(Filters.reverseAudio());
+        }
 
-        if ((source.speed - 1.0).abs() > 1e-6) {
+        if (!source.hasRamp && (source.speed - 1.0).abs() > 1e-6) {
           if (source.preservePitch) {
             chain.thenAll(Filters.audioSpeed(source.speed));
           } else {
@@ -1704,6 +1946,7 @@ class _AudioSource {
     required this.equalizer,
     required this.reversed,
     required this.voiceEffect,
+    this.rampClip,
   });
 
   final String assetId;
@@ -1720,4 +1963,11 @@ class _AudioSource {
   final EqualizerSettings? equalizer;
   final bool reversed;
   final VoiceEffect voiceEffect;
+
+  /// Set when this source's clip has a speed ramp, so the mix can be re-timed
+  /// segment by segment exactly as the picture is. Picture accelerating while
+  /// sound plays at one rate is a drift that grows across the clip.
+  final MediaClip? rampClip;
+
+  bool get hasRamp => rampClip?.hasSpeedRamp ?? false;
 }

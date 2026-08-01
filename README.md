@@ -16,12 +16,13 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  381 tests, all passing
+flutter test                 →  395 tests, all passing
 flutter build apk --release  →  built (117 MB, R8 + shrinker)
 tool/verify_shaders.sh       →  PASS (real impellerc)
 tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
 tool/verify_ducking.sh       →  PASS (real ffmpeg, measured 6 dB duck)
 tool/verify_placement.sh     →  PASS (real ffmpeg, pixel-checked composite)
+tool/verify_speed_ramp.sh    →  PASS (real ffmpeg, measured acceleration)
 ```
 
 Verified against Flutter 3.44.6 / Dart 3.12.2 / AGP 9.0.1 / Gradle 9.1.
@@ -58,6 +59,9 @@ what is architected with a working seam but needs an external piece. See
 | Range export, test render, keyframe curve editor | Implemented + tested |
 | Title templates, chapter export, watermark | Implemented + tested |
 | Detailed audio view, pre-render planning, multicam | Implemented + tested |
+| Speed ramps, blend modes, transition easing | Implemented + tested — pixel-verified |
+| Hero moment, audio-reactive pulse, A-B compare | Implemented |
+| Project search, saved export presets, first-run tour | Implemented |
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |

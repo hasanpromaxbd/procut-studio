@@ -27,6 +27,7 @@ class RhythmSheet extends ConsumerStatefulWidget {
 
 class _RhythmSheetState extends ConsumerState<RhythmSheet> {
   int _everyNth = 1;
+  double _pulse = 0.06;
   bool _detecting = false;
 
   @override
@@ -111,6 +112,46 @@ class _RhythmSheetState extends ConsumerState<RhythmSheet> {
             label: Text(
               beats.isEmpty ? 'Cut on beats' : 'Cut at $cuts point(s)',
             ),
+          ),
+
+          const SectionHeader(title: '3 · Or make it pulse'),
+          Text(
+            'Adds a scale bump on each beat as ordinary keyframes — curve or '
+            'delete them afterwards like any other animation. Moving the '
+            'music later will not move the pulse.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: Spacing.sm),
+          Row(
+            children: [
+              Text('Strength', style: theme.textTheme.bodySmall),
+              Expanded(
+                child: Slider(
+                  value: _pulse,
+                  min: 0.02,
+                  max: 0.3,
+                  onChanged: (value) => setState(() => _pulse = value),
+                ),
+              ),
+              Text(
+                '${(_pulse * 100).round()}%',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+          FilledButton.tonalIcon(
+            onPressed: beats.isEmpty || selected == 0
+                ? null
+                : () {
+                    ref
+                        .read(
+                          editorControllerProvider(widget.projectId).notifier,
+                        )
+                        .pulseOnBeats(amount: _pulse);
+                    unawaited(HapticFeedback.mediumImpact());
+                  },
+            icon: const Icon(Icons.graphic_eq_rounded),
+            label: const Text('Pulse on the beat'),
           ),
 
           if (editor?.errorMessage != null) ...[

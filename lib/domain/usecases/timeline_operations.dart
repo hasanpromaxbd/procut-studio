@@ -1595,6 +1595,117 @@ abstract final class TimelineOperations {
     );
   }
 
+  // ── Audio-reactive motion ────────────────────────────────────────────
+
+  /// Makes a clip pulse on each beat, as ordinary transform keyframes.
+  ///
+  /// Keyframes rather than a live audio link, deliberately: the pulse can
+  /// then be curved, nudged or deleted like any other animation, it exports
+  /// through the machinery that already exists, and nothing has to analyse
+  /// audio at render time. The trade is that moving the music afterwards does
+  /// not move the pulse — which the sheet says.
+  ///
+  /// [beats] are timeline instants; only those inside the clip produce a
+  /// keyframe, and each one gets three: rest, hit, rest.
+  static Result<Timeline> pulseOnBeats(
+    Timeline timeline,
+    String clipId,
+    Iterable<Duration> beats, {
+    double amount = 0.06,
+    Duration attack = const Duration(milliseconds: 60),
+    Duration release = const Duration(milliseconds: 180),
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final (track, clip) = found;
+    if (clip.locked) {
+      return const Result.err(InvalidEditFailure('This clip is locked.'));
+    }
+
+    final base = clip.transform.scaleX.valueAt(Duration.zero);
+    final peak = base * (1 + amount.clamp(0.01, 1.0));
+
+    final inside = beats
+        .map((b) => b - clip.start)
+        .where((local) => local >= Duration.zero && local <= clip.duration)
+        .toList()
+      ..sort();
+    if (inside.isEmpty) {
+      return const Result.err(
+        InvalidEditFailure('No beats fall inside this clip.'),
+      );
+    }
+
+    var curve = AnimatableDouble(base, keyframes: [
+      Keyframe(time: Duration.zero, value: base),
+    ]);
+
+    Duration? previousEnd;
+    for (final at in inside) {
+      final hitStart = at - attack;
+      final hitEnd = at + release;
+      // Beats closer together than one pulse would fight each other; the
+      // later one wins rather than producing a jitter neither reads as.
+      if (previousEnd != null && hitStart < previousEnd) continue;
+
+      if (hitStart > Duration.zero) {
+        curve = curve.withKeyframe(Keyframe(time: hitStart, value: base));
+      }
+      curve = curve.withKeyframe(Keyframe(time: at, value: peak));
+      if (hitEnd < clip.duration) {
+        curve = curve.withKeyframe(Keyframe(time: hitEnd, value: base));
+      }
+      previousEnd = hitEnd;
+    }
+
+    final transform = clip.transform.copyWith(scaleX: curve, scaleY: curve);
+    return Result.ok(
+      timeline.replaceTrack(
+        track.replaceClip(clip.copyWithBase(transform: transform)),
+      ),
+    );
+  }
+
+  // ── Hero moment ──────────────────────────────────────────────────────
+
+  /// Freezes the frame at [at] and pushes into it — the "hold on this"
+  /// gesture.
+  ///
+  /// Two existing operations, in the one order that works: freeze first, so
+  /// there is a still clip to push into, then Ken Burns that still. Doing it
+  /// by hand means finding the frozen piece among three new clips and
+  /// remembering which one to animate, which is exactly the friction worth
+  /// removing.
+  static Result<Timeline> heroMoment(
+    Timeline timeline,
+    String clipId,
+    Duration at, {
+    Duration hold = const Duration(seconds: 2),
+    double zoom = 0.22,
+  }) {
+    final frozen = freezeFrame(timeline, clipId, at, holdDuration: hold);
+    if (frozen is Err<Timeline>) return frozen;
+    var next = frozen.getOrElse(timeline);
+
+    // `freezeFrame` inserts the still starting exactly at the cut, so it is
+    // the clip covering that instant.
+    final clip = next.findClip(clipId)?.$2;
+    final track = clip == null ? null : next.trackById(clip.trackId);
+    final still = track?.clipAt(at);
+    if (still == null) {
+      return const Result.err(
+        InvalidEditFailure('Could not find the frozen frame to push into.'),
+      );
+    }
+
+    final pushed = kenBurns(next, still.id, zoom: zoom);
+    if (pushed is Err<Timeline>) return pushed;
+    next = pushed.getOrElse(next);
+    return Result.ok(next);
+  }
+
   // ── Multicam ─────────────────────────────────────────────────────────
 
   /// Cuts [clipId] at [at] and swaps the second half to [angle].

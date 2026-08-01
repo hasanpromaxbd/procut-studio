@@ -65,6 +65,7 @@ final List<(String, String Function(AppStrings))> _accessors = [
   ('toolChapters', (s) => s.toolChapters),
   ('toolAudioDetail', (s) => s.toolAudioDetail),
   ('toolMulticam', (s) => s.toolMulticam),
+  ('toolPrerender', (s) => s.toolPrerender),
   ('startExport', (s) => s.startExport),
   ('addToQueue', (s) => s.addToQueue),
   ('exportQueue', (s) => s.exportQueue),

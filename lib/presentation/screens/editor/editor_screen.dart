@@ -28,6 +28,7 @@ import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/editor_state.dart';
 import '../../viewmodels/eyedropper_controller.dart';
 import '../../viewmodels/playhead_controller.dart';
+import '../../viewmodels/preview_prefs.dart';
 import '../../viewmodels/timeline_view_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 import '../../widgets/editor/guides_overlay.dart';
@@ -36,6 +37,7 @@ import '../../widgets/timeline/timeline_widget.dart';
 import '../export/export_screen.dart';
 import '../home/templates_screen.dart';
 import 'editor_shortcuts.dart';
+import 'first_run_tour.dart';
 import 'sheets/ai_tools_sheet.dart';
 import 'sheets/audio_detail_sheet.dart';
 import 'sheets/caption_sheet.dart';
@@ -50,6 +52,7 @@ import 'sheets/media_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
 import 'sheets/multicam_sheet.dart';
+import 'sheets/prerender_sheet.dart';
 import 'sheets/record_sheet.dart';
 import 'sheets/rhythm_sheet.dart';
 import 'sheets/scopes_sheet.dart';
@@ -75,6 +78,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // After the first frame, so the tour opens over a drawn editor rather
+    // than an empty one.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(maybeShowTour(context, ref));
+    });
     _clock = PlaybackClock(vsync: this)
       ..onTick = (position) {
         ref.read(playheadControllerProvider.notifier).tick(position);
@@ -303,6 +311,34 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                     child: Text(kind.label),
                   ),
               ],
+            );
+          },
+        ),
+        Consumer(
+          builder: (context, ref, _) {
+            final bypassed = ref.watch(bypassEffectsProvider);
+            return GestureDetector(
+              // Press and hold to see the ungraded frame; releasing puts the
+              // grade back, so it cannot be left on by accident.
+              onTapDown: (_) => ref
+                  .read(bypassEffectsProvider.notifier)
+                  .set(bypassed: true),
+              onTapUp: (_) => ref
+                  .read(bypassEffectsProvider.notifier)
+                  .set(bypassed: false),
+              onTapCancel: () => ref
+                  .read(bypassEffectsProvider.notifier)
+                  .set(bypassed: false),
+              child: IconButton(
+                icon: Icon(
+                  bypassed
+                      ? Icons.compare_rounded
+                      : Icons.compare_outlined,
+                ),
+                isSelected: bypassed,
+                tooltip: 'Hold to see it ungraded',
+                onPressed: () {},
+              ),
             );
           },
         ),
@@ -559,6 +595,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         await ToolSheet.show<void>(
           context,
           sheet: RhythmSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.prerender:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: PrerenderSheet(projectId: widget.projectId),
         );
 
       case _ToolAction.multicam:
@@ -875,6 +918,7 @@ enum _ToolAction {
   chapters,
   audioDetail,
   multicam,
+  prerender,
   mixer,
   addTrack,
 }
@@ -1014,6 +1058,11 @@ class _ToolRail extends ConsumerWidget {
         label: strings.toolJumpCut,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.jumpCut),
+      ),
+      ToolIconButton(
+        icon: Icons.speed_rounded,
+        label: strings.toolPrerender,
+        onPressed: () => onAction(_ToolAction.prerender),
       ),
       ToolIconButton(
         icon: Icons.switch_video_rounded,

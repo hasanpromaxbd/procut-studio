@@ -45,6 +45,7 @@ class HomeScreen extends ConsumerWidget {
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _Header()),
+            const SliverToBoxAdapter(child: _SearchField()),
             projects.when(
               loading: () => const SliverFillRemaining(
                 hasScrollBody: false,
@@ -602,6 +603,63 @@ class _NewProjectSheetState extends State<_NewProjectSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Finds a project by name once there are too many to scan.
+class _SearchField extends ConsumerStatefulWidget {
+  const _SearchField();
+
+  @override
+  ConsumerState<_SearchField> createState() => _SearchFieldState();
+}
+
+class _SearchFieldState extends ConsumerState<_SearchField> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = ref.watch(projectQueryProvider);
+    if (_controller.text != query) {
+      _controller.value = TextEditingValue(
+        text: query,
+        selection: TextSelection.collapsed(offset: query.length),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        Spacing.lg,
+        0,
+        Spacing.lg,
+        Spacing.sm,
+      ),
+      child: TextField(
+        controller: _controller,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Search projects',
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: query.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () =>
+                      ref.read(projectQueryProvider.notifier).clear(),
+                ),
+          border: const OutlineInputBorder(),
+        ),
+        onChanged: (value) =>
+            ref.read(projectQueryProvider.notifier).set(value),
       ),
     );
   }
