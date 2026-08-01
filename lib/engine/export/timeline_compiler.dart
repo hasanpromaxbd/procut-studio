@@ -615,7 +615,7 @@ class TimelineCompiler {
 
         // A ramp is built from its own sub-chains and arrives already
         // re-timed; everything else starts from one chain off the input.
-        final FilterChain chain;
+        FilterChain chain;
         if (!clip.isFrozen && clip.hasSpeedRamp) {
           final ramped = _rampedVideo(
             graph: graph,
@@ -671,7 +671,7 @@ class TimelineCompiler {
             clipForLabels: clip,
           );
         }
-        _appendEffects(chain, clip, automation);
+        chain = _appendEffects(graph, chain, clip, automation);
         _collectAutomation(automation, commandScripts, warnings);
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
         chain.thenAll(MaskCompiler.buildAnimated(clip.mask, clip.duration));
@@ -703,7 +703,7 @@ class TimelineCompiler {
           ),
         );
 
-        final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
+        var chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
         chain.then(Filters.fps(fps));
         final automation = _beginAutomation(chain, clip, workspaceDir, fps);
 
@@ -730,7 +730,7 @@ class TimelineCompiler {
             clipForLabels: clip,
           );
         }
-        _appendEffects(chain, clip, automation);
+        chain = _appendEffects(graph, chain, clip, automation);
         _collectAutomation(automation, commandScripts, warnings);
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
         chain.thenAll(MaskCompiler.buildAnimated(clip.mask, clip.duration));
@@ -791,8 +791,8 @@ class TimelineCompiler {
           ),
         );
 
-        final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
-        chain
+        graph
+            .chain(inputs: ['$index:v'], outputs: [label])
             .then(Filters.fps(fps))
             .then(
               Filter('scale', {
@@ -841,7 +841,7 @@ class TimelineCompiler {
 
         // The compound's own dressing applies to the composed result, the
         // way it would to any single clip.
-        final chain = graph.chain(inputs: [innerLabel], outputs: [label]);
+        var chain = graph.chain(inputs: [innerLabel], outputs: [label]);
         final automation = _beginAutomation(chain, clip, workspaceDir, fps);
         var dressed = false;
         final scale = clip.transform.scaleX.staticValue;
@@ -865,7 +865,7 @@ class TimelineCompiler {
           chain.then(Filters.vflip());
           dressed = true;
         }
-        _appendEffects(chain, clip, automation);
+        chain = _appendEffects(graph, chain, clip, automation);
         _collectAutomation(automation, commandScripts, warnings);
         final maskFilters = MaskCompiler.build(
           clip.mask.resolveAt(Duration.zero),
@@ -1465,33 +1465,85 @@ class TimelineCompiler {
 
   /// Appends the clip's effect filters, wiring up `sendcmd` automation when
   /// any of them are keyframed.
-  void _appendEffects(
+  /// Appends a clip's effects, returning the chain the caller should continue
+  /// with.
+  ///
+  /// Usually that is the chain it was given. An effect that needs a branching
+  /// graph — skin retouch combines the frame with a blurred copy of itself —
+  /// cannot live in a linear chain, so it splits the chain in two and the
+  /// caller carries on from the second half.
+  FilterChain _appendEffects(
+    FilterGraph graph,
     FilterChain chain,
     Clip clip,
     EffectAutomation automation,
   ) {
     final effects = clip.activeEffects;
-    if (effects.isEmpty) return;
+    if (effects.isEmpty) return chain;
 
     // Animated effects are built at their peak so the filter instance survives
     // into the graph — see EffectAutomationCompiler.representativeResolution.
+    // The original is carried alongside because labelling needs its identity,
+    // and a ResolvedEffect has deliberately forgotten it.
     final resolved = effects
         .map(
-          (e) => e.isAnimated
-              ? EffectAutomationCompiler.representativeResolution(
-                  e,
-                  clip.duration,
-                )
-              : e.resolveAt(Duration.zero),
+          (e) => (
+            e,
+            e.isAnimated
+                ? EffectAutomationCompiler.representativeResolution(
+                    e,
+                    clip.duration,
+                  )
+                : e.resolveAt(Duration.zero),
+          ),
         )
-        .toList();
+        .toList()
+      ..sort(
+        (a, b) => EffectCatalog.stageOrderOf(a.$2.type)
+            .compareTo(EffectCatalog.stageOrderOf(b.$2.type)),
+      );
 
-    final filters = EffectCatalog.buildChain(resolved);
+    var current = chain;
+    final pending = <Filter>[];
 
-    if (automation.hasScript) {
-      EffectAutomationCompiler.applyLabels(filters, effects);
+    void flush() {
+      if (pending.isEmpty) return;
+      current.thenAll(pending);
+      pending.clear();
     }
-    chain.thenAll(filters);
+
+    for (final (original, effect) in resolved) {
+      if (effect.isNoOp) continue;
+      final spec = EffectCatalog.specFor(effect.type);
+      if (spec == null) continue;
+
+      if (!spec.needsGraph) {
+        final produced = spec.buildFilters(effect);
+        if (automation.hasScript) {
+          // One effect's filters at a time — see applyLabels for why the
+          // scope matters.
+          EffectAutomationCompiler.applyLabels(produced, [original]);
+        }
+        pending.addAll(produced);
+        continue;
+      }
+
+      flush();
+      // Hand the chain's destination to a fresh chain and route this one into
+      // the branching effect instead, so what the caller asked for still ends
+      // up carrying the final result.
+      final downstream = List<String>.of(current.outputs);
+      final bridge = graph.newLabel('fxin');
+      current.outputs
+        ..clear()
+        ..add(bridge);
+
+      final produced = spec.buildGraph!(graph, bridge, effect);
+      current = graph.chain(inputs: [produced], outputs: downstream);
+    }
+
+    flush();
+    return current;
   }
 
   /// Compiles a clip's automation and puts `sendcmd` at the head of its chain.

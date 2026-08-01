@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import '../../domain/entities/effect.dart';
 import '../../domain/entities/keyframe.dart';
 import '../ffmpeg/filter_graph.dart';
+import 'grade_compiler.dart';
+import 'retouch_compiler.dart';
 
 /// One tunable knob on an effect.
 @immutable
@@ -77,6 +79,30 @@ class EffectCommandBinding {
   final double Function(ResolvedEffect effect) valueAt;
 }
 
+/// The same binding for a parameter whose value is text rather than a number.
+///
+/// There is exactly one of these in practice — a tone curve, whose value is a
+/// list of points — but a scalar binding cannot express it, and without it a
+/// grade would animate its wheels while its curve sat frozen. A partly
+/// animated effect is worse than an un-animated one: the user sees *some*
+/// movement and assumes the rest is intentional.
+@immutable
+class EffectStringCommandBinding {
+  const EffectStringCommandBinding({
+    required this.filter,
+    required this.parameter,
+    required this.valueAt,
+  });
+
+  final String filter;
+  final String parameter;
+
+  /// Null means "nothing to say at this instant" — the previous value stands.
+  /// A curve that is the identity emits no filter at all, so there would be
+  /// nothing to address.
+  final String? Function(ResolvedEffect effect) valueAt;
+}
+
 @immutable
 class EffectSpec {
   const EffectSpec({
@@ -88,7 +114,9 @@ class EffectSpec {
     required this.params,
     required this.shaderAsset,
     required this.buildFilters,
+    this.buildGraph,
     this.commands = const [],
+    this.stringCommands = const [],
     this.isAudioEffect = false,
     this.requiresPreRender = false,
   });
@@ -101,7 +129,17 @@ class EffectSpec {
   /// export and renders at its `t=0` value.
   final List<EffectCommandBinding> commands;
 
-  bool get supportsExportAnimation => commands.isNotEmpty;
+  /// Text-valued command bindings — see [EffectStringCommandBinding].
+  final List<EffectStringCommandBinding> stringCommands;
+
+  bool get supportsExportAnimation =>
+      commands.isNotEmpty || stringCommands.isNotEmpty;
+
+  /// Every filter name this effect can drive at runtime.
+  Set<String> get commandTargets => {
+    for (final c in commands) c.filter,
+    for (final c in stringCommands) c.filter,
+  };
 
   final EffectType type;
   final String label;
@@ -117,6 +155,16 @@ class EffectSpec {
 
   /// Emits the FFmpeg filters for this effect at a resolved instant.
   final List<Filter> Function(ResolvedEffect effect) buildFilters;
+
+  /// For effects that need a *branching* graph rather than a linear chain —
+  /// anything that has to combine the frame with a processed copy of itself.
+  ///
+  /// Takes the label carrying the frame so far and returns the label carrying
+  /// the result. When set, [buildFilters] is not used.
+  final String Function(FilterGraph graph, String input, ResolvedEffect effect)?
+  buildGraph;
+
+  bool get needsGraph => buildGraph != null;
 
   final bool isAudioEffect;
 
@@ -135,6 +183,19 @@ class EffectSpec {
     }
     return null;
   }
+}
+
+/// One of the grade's three wheels, resolved the same way the compiler does.
+///
+/// The command bindings and [GradeCompiler.build] must agree exactly: the
+/// filter instance is built from the second and then driven by the first, so
+/// any difference shows up as a jump on the clip's first frame.
+GradeWheel _wheel(ResolvedEffect fx, String zone) {
+  final mix = fx.intensity.clamp(0.0, 1.0);
+  return GradeWheel.fromPosition(
+    fx.value('${zone}X') * mix,
+    fx.value('${zone}Y') * mix,
+  );
 }
 
 abstract final class EffectCatalog {
@@ -639,6 +700,41 @@ abstract final class EffectCatalog {
       },
     ),
 
+    // ── Retouch ────────────────────────────────────────────────────────
+    EffectSpec(
+      type: EffectType.faceRetouch,
+      label: 'Retouch',
+      description: 'Softens skin without flattening eyes, hair or the frame.',
+      icon: Icons.face_retouching_natural_rounded,
+      stage: EffectStage.color,
+      shaderAsset: 'shaders/retouch.frag',
+      params: const [
+        EffectParamSpec(
+          key: 'smooth',
+          label: 'Smoothing',
+          min: 0,
+          max: 1,
+          defaultValue: 0.5,
+        ),
+        EffectParamSpec(
+          key: 'glow',
+          label: 'Glow',
+          min: 0,
+          max: 1,
+          defaultValue: 0.2,
+        ),
+        EffectParamSpec(
+          key: 'clarity',
+          label: 'Eye clarity',
+          min: 0,
+          max: 1,
+          defaultValue: 0.3,
+        ),
+      ],
+      buildFilters: (_) => const [],
+      buildGraph: RetouchCompiler.build,
+    ),
+
     // ── Colour ─────────────────────────────────────────────────────────
     EffectSpec(
       type: EffectType.cinematicLut,
@@ -774,6 +870,180 @@ abstract final class EffectCatalog {
     ),
 
     EffectSpec(
+      type: EffectType.colorGrade,
+      label: 'Grade',
+      description:
+          'White balance, tone and three-way colour wheels — the full grade.',
+      icon: Icons.gradient_rounded,
+      stage: EffectStage.color,
+      shaderAsset: 'shaders/grade.frag',
+      params: const [
+        EffectParamSpec(
+          key: 'warmth',
+          label: 'Warmth',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(
+          key: 'tint',
+          label: 'Tint',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(
+          key: 'contrast',
+          label: 'Contrast',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(
+          key: 'pivot',
+          label: 'Pivot',
+          min: 0.2,
+          max: 0.8,
+          defaultValue: 0.5,
+        ),
+        EffectParamSpec(
+          key: 'shadows',
+          label: 'Shadows',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(
+          key: 'highlights',
+          label: 'Highlights',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(key: 'liftX', label: 'Lift ×', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(key: 'liftY', label: 'Lift Y', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(key: 'gammaX', label: 'Gamma ×', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(key: 'gammaY', label: 'Gamma Y', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(key: 'gainX', label: 'Gain ×', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(key: 'gainY', label: 'Gain Y', min: -1, max: 1, defaultValue: 0),
+        EffectParamSpec(
+          key: 'vibrance',
+          label: 'Vibrance',
+          min: -1,
+          max: 1,
+          defaultValue: 0,
+        ),
+        EffectParamSpec(
+          key: 'saturation',
+          label: 'Saturation',
+          min: 0,
+          max: 2,
+          defaultValue: 1,
+        ),
+      ],
+      buildFilters: GradeCompiler.build,
+      commands: [
+        EffectCommandBinding(
+          filter: 'colortemperature',
+          parameter: 'temperature',
+          valueAt: (fx) => GradeCompiler.kelvinFor(
+            fx.value('warmth').clamp(-1.0, 1.0) * fx.intensity,
+          ),
+        ),
+        EffectCommandBinding(
+          filter: 'colorchannelmixer',
+          parameter: 'gg',
+          valueAt: (fx) =>
+              1 + fx.value('tint').clamp(-1.0, 1.0) * fx.intensity * 0.12,
+        ),
+        EffectCommandBinding(
+          filter: 'colorchannelmixer',
+          parameter: 'rr',
+          valueAt: (fx) =>
+              1 - fx.value('tint').clamp(-1.0, 1.0) * fx.intensity * 0.06,
+        ),
+        EffectCommandBinding(
+          filter: 'colorchannelmixer',
+          parameter: 'bb',
+          valueAt: (fx) =>
+              1 - fx.value('tint').clamp(-1.0, 1.0) * fx.intensity * 0.06,
+        ),
+        // The nine wheel channels. Written out rather than generated because a
+        // binding is a const value, and the alternative — a loop building them
+        // at startup — trades a readable list for a clever one.
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'rs',
+          valueAt: (fx) => _wheel(fx, 'lift').r,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'gs',
+          valueAt: (fx) => _wheel(fx, 'lift').g,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'bs',
+          valueAt: (fx) => _wheel(fx, 'lift').b,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'rm',
+          valueAt: (fx) => _wheel(fx, 'gamma').r,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'gm',
+          valueAt: (fx) => _wheel(fx, 'gamma').g,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'bm',
+          valueAt: (fx) => _wheel(fx, 'gamma').b,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'rh',
+          valueAt: (fx) => _wheel(fx, 'gain').r,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'gh',
+          valueAt: (fx) => _wheel(fx, 'gain').g,
+        ),
+        EffectCommandBinding(
+          filter: 'colorbalance',
+          parameter: 'bh',
+          valueAt: (fx) => _wheel(fx, 'gain').b,
+        ),
+        EffectCommandBinding(
+          filter: 'vibrance',
+          parameter: 'intensity',
+          valueAt: (fx) =>
+              fx.value('vibrance').clamp(-1.0, 1.0) * fx.intensity * 0.8,
+        ),
+        EffectCommandBinding(
+          filter: 'hue',
+          parameter: 's',
+          valueAt: (fx) =>
+              1 + (fx.value('saturation', 1) - 1) * fx.intensity,
+        ),
+      ],
+      stringCommands: [
+        EffectStringCommandBinding(
+          filter: 'curves',
+          parameter: 'all',
+          valueAt: (fx) => GradeCompiler.tonePoints(
+            contrast: fx.value('contrast').clamp(-1.0, 1.0) * fx.intensity,
+            pivot: fx.value('pivot', 0.5).clamp(0.15, 0.85),
+            shadows: fx.value('shadows').clamp(-1.0, 1.0) * fx.intensity,
+            highlights: fx.value('highlights').clamp(-1.0, 1.0) * fx.intensity,
+          ),
+        ),
+      ],
+    ),
+
+    EffectSpec(
       type: EffectType.stabilise,
       label: 'Stabilise',
       description: 'Smooths out camera shake. Analyses the clip first.',
@@ -858,6 +1128,9 @@ abstract final class EffectCatalog {
     }
     return filters;
   }
+
+  /// Sort key for the stage an effect belongs to.
+  static int stageOrderOf(EffectType type) => _stageOf(type).order;
 
   static EffectStage _stageOf(EffectType type) =>
       _specs[type]?.stage ?? EffectStage.stylise;

@@ -61,6 +61,7 @@ abstract class AppStrings {
   String get toolSplit;
   String get toolSpeed;
   String get toolEffects;
+  String get toolGrade;
   String get toolTransition;
   String get toolText;
   String get toolRecord;
@@ -182,6 +183,8 @@ class AppStringsEn extends AppStrings {
   String get toolSpeed => 'Speed';
   @override
   String get toolEffects => 'Effects';
+  @override
+  String get toolGrade => 'Grade';
   @override
   String get toolTransition => 'Transition';
   @override
@@ -350,6 +353,8 @@ class AppStringsBn extends AppStrings {
   String get toolSpeed => 'গতি';
   @override
   String get toolEffects => 'ইফেক্ট';
+  @override
+  String get toolGrade => 'কালার গ্রেড';
   @override
   String get toolTransition => 'ট্রানজিশন';
   @override

@@ -173,6 +173,33 @@ abstract final class ShaderUniforms {
           ..setFloat(3, effect.value('mix', 1) * effect.intensity);
         return true;
 
+      case EffectType.colorGrade:
+        shader
+          ..setFloat(2, effect.value('warmth'))
+          ..setFloat(3, effect.value('tint'))
+          ..setFloat(4, effect.value('contrast'))
+          ..setFloat(5, effect.value('pivot', 0.5))
+          ..setFloat(6, effect.value('shadows'))
+          ..setFloat(7, effect.value('highlights'))
+          ..setFloat(8, effect.value('liftX'))
+          ..setFloat(9, effect.value('liftY'))
+          ..setFloat(10, effect.value('gammaX'))
+          ..setFloat(11, effect.value('gammaY'))
+          ..setFloat(12, effect.value('gainX'))
+          ..setFloat(13, effect.value('gainY'))
+          ..setFloat(14, effect.value('vibrance'))
+          ..setFloat(15, effect.value('saturation', 1))
+          ..setFloat(16, effect.intensity);
+        return true;
+
+      case EffectType.faceRetouch:
+        shader
+          ..setFloat(2, effect.value('smooth', 0.5))
+          ..setFloat(3, effect.value('glow', 0.2))
+          ..setFloat(4, effect.value('clarity', 0.3))
+          ..setFloat(5, effect.intensity);
+        return true;
+
       case EffectType.colorAdjust:
       case EffectType.chromaKey:
         // Handled with a ColorFilter/ColorMatrix rather than a shader — far

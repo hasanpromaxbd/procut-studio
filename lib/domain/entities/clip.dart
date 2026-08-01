@@ -151,6 +151,8 @@ sealed class Clip {
   static EffectStage _stageOf(EffectType type) => switch (type) {
     EffectType.cinematicLut ||
     EffectType.colorAdjust ||
+    EffectType.colorGrade ||
+    EffectType.faceRetouch ||
     EffectType.chromaKey => EffectStage.color,
     EffectType.blur ||
     EffectType.motionBlur ||

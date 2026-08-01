@@ -30,9 +30,13 @@ enum EffectType {
   sharpen('sharpen'),
   noiseReduction('noise_reduction'),
 
+  // ── Retouch ──────────────────────────────────────────────────────────
+  faceRetouch('face_retouch'),
+
   // ── Colour ───────────────────────────────────────────────────────────
   cinematicLut('cinematic_lut'),
   colorAdjust('color_adjust'),
+  colorGrade('color_grade'),
   vignette('vignette'),
   chromaKey('chroma_key'),
 

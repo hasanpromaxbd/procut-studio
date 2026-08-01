@@ -95,12 +95,14 @@ abstract final class EffectAutomationCompiler {
       if (spec == null || !spec.supportsExportAnimation) continue;
 
       final label = labelFor(effect);
-      final targets = spec.commands.map((c) => c.filter).toSet();
+      final targets = spec.commandTargets;
 
       for (final filter in filters) {
-        // Only label an instance once: two effects can both emit `eq`, and the
-        // first unlabelled match belongs to the effect being processed because
-        // the chain is built in effect order.
+        // Only label an instance once. Callers pass one effect's own filters,
+        // which matters: an adjust and a grade both emit `colorbalance`, and
+        // labelling across a merged list would hand the grade's commands to
+        // the adjust's instance — the grade would then never animate and the
+        // adjust would animate to values meant for something else.
         if (targets.contains(filter.name) && filter.instanceLabel == null) {
           filter.labelled(label);
         }
@@ -326,6 +328,29 @@ abstract final class EffectAutomationCompiler {
           '${TimeUtils.toFfmpegSeconds(at)} '
           '${binding.filter}@$label ${binding.parameter} '
           '${FilterGraph.formatDouble(value)};',
+        );
+      }
+    }
+
+    for (final binding in spec.stringCommands) {
+      String? previous;
+
+      for (var i = 0; i <= sampleCount; i++) {
+        if (step * i > duration) break;
+        final at = _clampToLastFrame(step * i, lastFrame);
+
+        final value = binding.valueAt(effect.resolveAt(at));
+        if (value == null || value == previous) continue;
+        previous = value;
+
+        // Quoted here rather than by the graph escaper: this is a `sendcmd`
+        // script, not a filter description, and its parser wants the argument
+        // wrapped as one token when it contains spaces — which a curve, being
+        // a list of points, always does.
+        lines.add(
+          '${TimeUtils.toFfmpegSeconds(at)} '
+          '${binding.filter}@$label ${binding.parameter} '
+          "'$value';",
         );
       }
     }

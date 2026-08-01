@@ -44,6 +44,7 @@ import 'sheets/caption_sheet.dart';
 import 'sheets/chapters_sheet.dart';
 import 'sheets/curve_sheet.dart';
 import 'sheets/effects_sheet.dart';
+import 'sheets/grade_sheet.dart';
 import 'sheets/history_sheet.dart';
 import 'sheets/jump_cut_sheet.dart';
 import 'sheets/layout_sheet.dart';
@@ -523,6 +524,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: EffectsSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.grade:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: GradeSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.transition:
         if (!mounted) return;
         await ToolSheet.show<void>(
@@ -894,6 +902,7 @@ enum _ToolAction {
   duplicate,
   speed,
   effects,
+  grade,
   transition,
   text,
   record,
@@ -962,6 +971,12 @@ class _ToolRail extends ConsumerWidget {
         label: strings.toolEffects,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.effects),
+      ),
+      ToolIconButton(
+        icon: Icons.gradient_rounded,
+        label: strings.toolGrade,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.grade),
       ),
       ToolIconButton(
         icon: Icons.compare_arrows_rounded,

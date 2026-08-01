@@ -5,10 +5,10 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 395 tests passing, debug and release
-APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh`, `tool/verify_ducking.sh`
-`tool/verify_placement.sh` and `tool/verify_speed_ramp.sh` all pass against
-real impellerc/ffmpeg binaries.
+Verified state: `flutter analyze` clean, 421 tests passing, debug and release
+APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh`,
+`tool/verify_ducking.sh`, `tool/verify_placement.sh`, `tool/verify_speed_ramp.sh`
+and `tool/verify_grade.sh` all pass against real impellerc/ffmpeg binaries.
 
 ---
 
@@ -68,7 +68,7 @@ a field on the clip: `vidstabdetect` writes a motion file that
 
 ## Effects
 
-All 14 have both a GPU shader (preview) and an FFmpeg filter (export).
+All 16 have both a GPU shader (preview) and an FFmpeg filter (export).
 
 | Effect | Shader | FFmpeg |
 |---|---|---|
@@ -85,7 +85,37 @@ All 14 have both a GPU shader (preview) and an FFmpeg filter (export).
 | Noise reduction | `gaussian_blur.frag` | `hqdn3d` |
 | Cinematic LUT | `lut3d.frag` | `lut3d` |
 | Colour adjust | `ColorFilter.matrix` | `eq` + `colorbalance` |
+| Grade | `grade.frag` | six filters — see note 12 |
+| Retouch | `retouch.frag` | `bilateral` + `maskedmerge` — see note 11 |
 | Chroma key | — | `chromakey` |
+
+**Note 11 — face retouch.** Skin is found by *colour*, not by detecting a
+face: it occupies a narrow region of the Cb/Cr plane across every skin tone,
+because what varies between tones is mostly luma. A hand or a wooden door of
+roughly the right hue is treated as skin too — the alternative is shipping a
+face detector, which means hundreds of megabytes of weights and a licence.
+Smoothing runs through a feathered mask (`bilateral` + `maskedmerge`) so eyes
+and hair keep their edges, and it is the one effect that needs a *branching*
+graph, which is why `EffectSpec.buildGraph` exists.
+
+**Note 12 — grading.** One effect, fourteen controls, six filters in a fixed
+order: white balance (`colortemperature` + `colorchannelmixer`), tone
+(`curves`), three-way wheels (`colorbalance`), then saturation (`vibrance` +
+`hue`). The order is the feature — saturating before balancing amplifies the
+cast you are about to remove. Two things are worth knowing:
+
+* Each filter appears **once**. `sendcmd` addresses a filter by `name@label`
+  and the automation labels the first unlabelled instance, so a second
+  `colorbalance` inside one effect would be unaddressable and would silently
+  freeze at its first-frame value.
+* The wheels' zone weights are *fitted to `colorbalance`'s measured response*,
+  not assumed. The zones meet at a lightness of 0.25, not 0.5.
+  `tool/verify_grade.sh` re-measures them so the preview shader cannot drift
+  away from the filter unnoticed.
+
+The tone curve animates too, through the one text-valued command binding in
+the app (`EffectStringCommandBinding`). A grade whose wheels moved while its
+curve sat frozen would be worse than one that did not animate at all.
 
 **Note 3 — motion blur.** Temporal in export (`tmix` averages real neighbouring
 frames), spatial in preview (only one frame is available). The inspector says

@@ -16,13 +16,14 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  395 tests, all passing
+flutter test                 →  421 tests, all passing
 flutter build apk --release  →  built (117 MB, R8 + shrinker)
 tool/verify_shaders.sh       →  PASS (real impellerc)
 tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
 tool/verify_ducking.sh       →  PASS (real ffmpeg, measured 6 dB duck)
 tool/verify_placement.sh     →  PASS (real ffmpeg, pixel-checked composite)
 tool/verify_speed_ramp.sh    →  PASS (real ffmpeg, measured acceleration)
+tool/verify_grade.sh         →  PASS (real ffmpeg, measured zone response)
 ```
 
 Verified against Flutter 3.44.6 / Dart 3.12.2 / AGP 9.0.1 / Gradle 9.1.
@@ -65,7 +66,9 @@ what is architected with a working seam but needs an external piece. See
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |
-| 14 effects (blur, glow, VHS, RGB split, grain, LUT, …) | Implemented — GPU shader + FFmpeg filter |
+| Colour grading: three-way wheels, tone curve, white balance, vibrance, 6 looks | Implemented + tested — preview model fitted to the filter's measured response |
+| Face retouch: skin-aware smoothing, glow, clarity | Implemented + tested — chroma mask, no face detector, no downloaded weights |
+| 16 effects (blur, glow, VHS, RGB split, grain, LUT, grade, retouch, …) | Implemented — GPU shader + FFmpeg filter |
 | 10 transitions | Implemented — 6 native `xfade`, 4 via custom per-pixel expressions |
 | Text layers, 1500+ fonts, gradient/stroke/glow/shadow, 11 animations | Implemented |
 | Sticker and emoji layers | Implemented |

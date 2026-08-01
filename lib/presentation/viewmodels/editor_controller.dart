@@ -1578,6 +1578,65 @@ class EditorController extends Notifier<EditorState?> {
     );
   }
 
+  // ── Grading ──────────────────────────────────────────────────────────
+  //
+  // A grade is one effect with fourteen controls, and the grading panel drives
+  // it directly rather than through the generic effect inspector. These three
+  // methods are what that panel needs: read the current one, move some of its
+  // controls, take it off.
+
+  /// The grade on the selected clip, or null if it has none yet.
+  Effect? get selectedGrade {
+    final clipId = state?.selectedClipId;
+    if (clipId == null) return null;
+    final clip = state?.timeline.findClip(clipId)?.$2;
+    if (clip == null) return null;
+    for (final effect in clip.effects) {
+      if (effect.type == EffectType.colorGrade) return effect;
+    }
+    return null;
+  }
+
+  /// Moves some of the grade's controls, adding the grade if there isn't one.
+  ///
+  /// Partial by design — a colour wheel writes two keys and leaves the other
+  /// twelve alone, so the panel never has to send back a full state it might
+  /// have read a moment out of date.
+  void setGradeValues(Map<String, double> values, {String label = 'grade'}) {
+    final current = state;
+    final clipId = current?.selectedClipId;
+    if (current == null || clipId == null || values.isEmpty) return;
+
+    final clip = current.timeline.findClip(clipId)?.$2;
+    if (clip == null) return;
+
+    final spec = EffectCatalog.specFor(EffectType.colorGrade);
+    if (spec == null) return;
+
+    final existing = selectedGrade;
+    var grade = existing ?? spec.instantiate(IdGenerator.effect());
+    for (final entry in values.entries) {
+      final param = spec.param(entry.key);
+      grade = grade.withParamValue(
+        entry.key,
+        param == null ? entry.value : param.clamp(entry.value),
+      );
+    }
+
+    _apply(
+      existing == null
+          ? TimelineOperations.addEffect(current.timeline, clipId, grade)
+          : TimelineOperations.updateEffect(current.timeline, clipId, grade),
+      label,
+    );
+  }
+
+  void clearGrade() {
+    final grade = selectedGrade;
+    if (grade == null) return;
+    removeEffect(grade.id);
+  }
+
   void setTransition(
     String clipId,
     TransitionType type, {
