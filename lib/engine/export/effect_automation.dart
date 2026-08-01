@@ -29,6 +29,7 @@ library;
 import '../../core/utils/time_utils.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
+import '../../domain/entities/keyframe.dart';
 import '../effects/effect_catalog.dart';
 import '../ffmpeg/filter_graph.dart';
 
@@ -74,6 +75,14 @@ abstract final class EffectAutomationCompiler {
   /// Returns the label assigned per effect, keyed by effect id.
   static String labelFor(Effect effect) =>
       'fx${effect.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
+
+  /// Label for the filter instance that carries a clip's animated opacity.
+  static String opacityLabelFor(Clip clip) =>
+      'op${clip.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
+
+  /// Label for the one carrying its animated rotation.
+  static String rotationLabelFor(Clip clip) =>
+      'rot${clip.id.replaceAll(RegExp(r'[^A-Za-z0-9]'), '')}';
 
   /// Applies instance labels to every filter an animated effect owns.
   static void applyLabels(
@@ -150,14 +159,50 @@ abstract final class EffectAutomationCompiler {
   static EffectAutomation compile({
     required Clip clip,
     required String scriptPath,
+    required int fps,
   }) {
     final animated = clip.activeEffects.where((e) => e.isAnimated).toList();
-    if (animated.isEmpty) {
+    final transform = clip.transform;
+    final hasTransformAnimation =
+        transform.opacity.isAnimated || transform.rotation.isAnimated;
+    if (animated.isEmpty && !hasTransformAnimation) {
       return const EffectAutomation(script: null, staticEffectTypes: []);
     }
 
     final unsupported = <EffectType>[];
     final lines = <String>[];
+
+    // Opacity and rotation are transform channels, not effects, but they are
+    // driven the same way: both `colorchannelmixer` and `rotate` accept
+    // runtime commands, so the machinery built for animated effects covers
+    // them with no new mechanism.
+    if (transform.opacity.isAnimated) {
+      lines.addAll(
+        _channelScript(
+          channel: transform.opacity,
+          target: 'colorchannelmixer@${opacityLabelFor(clip)}',
+          parameter: 'aa',
+          duration: clip.duration,
+          fps: fps,
+          clampLow: 0,
+          clampHigh: 1,
+        ),
+      );
+    }
+    if (transform.rotation.isAnimated) {
+      lines.addAll(
+        _channelScript(
+          channel: transform.rotation,
+          target: 'rotate@${rotationLabelFor(clip)}',
+          parameter: 'angle',
+          duration: clip.duration,
+          fps: fps,
+          // `rotate` speaks radians; the entity stores degrees because that
+          // is what the inspector shows.
+          transformValue: (degrees) => degrees * 3.14159265358979 / 180,
+        ),
+      );
+    }
 
     for (final effect in animated) {
       final spec = EffectCatalog.specFor(effect.type);
@@ -168,7 +213,7 @@ abstract final class EffectAutomationCompiler {
       }
 
       final label = labelFor(effect);
-      lines.addAll(_scriptFor(effect, spec, label, clip.duration));
+      lines.addAll(_scriptFor(effect, spec, label, clip.duration, fps));
     }
 
     if (lines.isEmpty) {
@@ -184,11 +229,72 @@ abstract final class EffectAutomationCompiler {
     );
   }
 
+  /// The timestamp of the clip's final frame.
+  ///
+  /// A command scheduled at exactly the clip's duration is never executed —
+  /// there is no frame at that instant — so an animation's endpoint value
+  /// would never be applied. A fade to black stops one sample short of black,
+  /// which is visible, and was.
+  static Duration _lastFrameTime(Duration duration, int fps) {
+    final frame = Duration(microseconds: (1e6 / (fps <= 0 ? 30 : fps)).round());
+    final last = duration - frame;
+    return last < Duration.zero ? Duration.zero : last;
+  }
+
+  static Duration _clampToLastFrame(Duration at, Duration lastFrame) =>
+      at > lastFrame ? lastFrame : at;
+
+  /// Sample lines for one animated transform channel.
+  static List<String> _channelScript({
+    required AnimatableDouble channel,
+    required String target,
+    required String parameter,
+    required Duration duration,
+    required int fps,
+    double? clampLow,
+    double? clampHigh,
+    double Function(double)? transformValue,
+  }) {
+    if (duration <= Duration.zero) return const [];
+
+    final sampleCount = (duration.inMicroseconds * _samplesPerSecond / 1e6)
+        .ceil()
+        .clamp(2, 6000);
+    final step = Duration(microseconds: duration.inMicroseconds ~/ sampleCount);
+    final lastFrame = _lastFrameTime(duration, fps);
+
+    final lines = <String>[];
+    double? previous;
+
+    for (var i = 0; i <= sampleCount; i++) {
+      final at = _clampToLastFrame(step * i, lastFrame);
+      if (step * i > duration) break;
+
+      var value = channel.valueAt(at);
+      if (clampLow != null || clampHigh != null) {
+        value = value.clamp(clampLow ?? value, clampHigh ?? value);
+      }
+      value = transformValue?.call(value) ?? value;
+
+      // A channel that barely moves between samples costs one line, not a
+      // hundred — the same economy the effect path uses.
+      if (previous != null && (value - previous).abs() < 1e-4) continue;
+      previous = value;
+
+      lines.add(
+        '${TimeUtils.toFfmpegSeconds(at)} $target $parameter '
+        '${FilterGraph.formatDouble(value)};',
+      );
+    }
+    return lines;
+  }
+
   static List<String> _scriptFor(
     Effect effect,
     EffectSpec spec,
     String label,
     Duration duration,
+    int fps,
   ) {
     final sampleCount =
         (duration.inMicroseconds * _samplesPerSecond / 1e6).ceil().clamp(2, 6000);
@@ -197,13 +303,14 @@ abstract final class EffectAutomationCompiler {
     );
 
     final lines = <String>[];
+    final lastFrame = _lastFrameTime(duration, fps);
 
     for (final binding in spec.commands) {
       double? previous;
 
       for (var i = 0; i <= sampleCount; i++) {
-        final at = step * i;
-        if (at > duration) break;
+        if (step * i > duration) break;
+        final at = _clampToLastFrame(step * i, lastFrame);
 
         final resolved = effect.resolveAt(at);
         final value = binding.valueAt(resolved);

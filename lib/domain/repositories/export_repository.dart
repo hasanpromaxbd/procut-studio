@@ -3,6 +3,7 @@ library;
 
 import '../../core/error/result.dart';
 import '../entities/export_job.dart';
+import '../entities/export_range.dart';
 import '../entities/export_settings.dart';
 import '../entities/project.dart';
 
@@ -11,10 +12,14 @@ abstract interface class ExportRepository {
   /// then closes. Cancelling the subscription does **not** cancel the job —
   /// call [cancel] for that, so navigating away does not bin a 20-minute
   /// export.
+  /// [range] renders only a window of the timeline. The edit is unchanged —
+  /// the compiler trims the tail of the same graph — so what comes out is a
+  /// true sample of the full render, which is the point of a test render.
   Stream<ExportProgress> export(
     Project project,
     ExportSettings settings, {
     required String jobId,
+    ExportRange? range,
   });
 
   Future<Result<void>> cancel(String jobId);

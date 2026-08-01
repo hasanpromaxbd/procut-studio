@@ -21,6 +21,7 @@ import '../../core/services/media_store_channel.dart';
 import '../../core/services/path_service.dart';
 import '../../core/utils/file_utils.dart';
 import '../../domain/entities/export_job.dart';
+import '../../domain/entities/export_range.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/project.dart';
 import '../../domain/repositories/export_repository.dart';
@@ -70,6 +71,7 @@ class ExportEngine implements ExportRepository {
     Project project,
     ExportSettings settings, {
     required String jobId,
+    ExportRange? range,
   }) async* {
     final workspace = _paths.renderWorkspace(jobId);
     var progress = ExportProgress(
@@ -162,6 +164,7 @@ class ExportEngine implements ExportRepository {
         outputPath: outputFile.path,
         encoder: encoder,
         encoderProbe: _encoderProbe,
+        range: range,
       );
 
       final totalSteps = plan.rasterSteps.length + plan.preRenderSteps.length + 1;
@@ -314,6 +317,9 @@ class ExportEngine implements ExportRepository {
             outputPath: outputFile.path,
             encoder: encoder,
             encoderProbe: _encoderProbe,
+            // The fallback must render the same window; without this a
+            // failed hardware pass would silently retry the whole timeline.
+            range: range,
           );
           // Paths are deterministic, so this rewrites the same files.
           for (final script in plan.commandScripts) {

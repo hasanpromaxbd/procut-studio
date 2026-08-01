@@ -12,10 +12,12 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/time_utils.dart';
 import '../../../domain/entities/export_job.dart';
 import '../../../domain/entities/export_preset.dart';
+import '../../../domain/entities/export_range.dart';
 import '../../../domain/entities/export_settings.dart';
 import '../../viewmodels/editor_controller.dart';
 import '../../viewmodels/export_controller.dart';
 import '../../viewmodels/export_queue_controller.dart';
+import '../../viewmodels/playhead_controller.dart';
 import '../../widgets/common/glass_panel.dart';
 
 class ExportScreen extends ConsumerStatefulWidget {
@@ -69,6 +71,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    _RangeRow(projectId: widget.projectId),
                     const _QueueSummary(),
                     Row(
                       children: [
@@ -91,7 +94,11 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                                         );
                                     await ref
                                         .read(exportControllerProvider.notifier)
-                                        .start(editor.project, settings);
+                                        .start(
+                                          editor.project,
+                                          settings,
+                                          range: ref.read(exportRangeProvider),
+                                        );
                                   }
                                 : null,
                           ),
@@ -746,6 +753,79 @@ class _QueueSheet extends ConsumerWidget {
                 _ => null,
               },
             ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Which slice of the timeline to render, plus the test-render shortcut.
+///
+/// Null means the whole thing. Kept in its own provider rather than in export
+/// settings because it is about *this* render, not a preference to persist —
+/// nobody wants yesterday's in-point silently applied to today's export.
+final exportRangeProvider = NotifierProvider<ExportRangeController, ExportRange?>(
+  ExportRangeController.new,
+);
+
+class ExportRangeController extends Notifier<ExportRange?> {
+  @override
+  ExportRange? build() => null;
+
+  void set(ExportRange? range) => state = range;
+  void clear() => state = null;
+}
+
+class _RangeRow extends ConsumerWidget {
+  const _RangeRow({required this.projectId});
+
+  final String projectId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final range = ref.watch(exportRangeProvider);
+    final editor = ref.watch(editorControllerProvider(projectId));
+    final playhead = ref.watch(playheadControllerProvider);
+    if (editor == null) return const SizedBox.shrink();
+
+    final total = editor.timeline.duration;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Spacing.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              range == null
+                  ? 'Rendering the whole timeline '
+                        '(${TimeUtils.formatShort(total)})'
+                  : 'Rendering ${TimeUtils.formatShort(range.start)}'
+                        '–${TimeUtils.formatShort(range.end)} '
+                        '(${TimeUtils.formatShort(range.duration)})',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          if (range != null)
+            TextButton(
+              onPressed: () => ref.read(exportRangeProvider.notifier).clear(),
+              child: const Text('Whole'),
+            ),
+          TextButton(
+            onPressed: () {
+              // A ten-second window at the playhead: long enough to judge a
+              // grade or a transition, short enough to sit through.
+              ref.read(exportRangeProvider.notifier).set(
+                    ExportRange.around(
+                      playhead.position,
+                      length: const Duration(seconds: 10),
+                    ).clampedTo(total) ??
+                        ExportRange(start: Duration.zero, end: total),
+                  );
+            },
+            child: const Text('10s test'),
+          ),
         ],
       ),
     );

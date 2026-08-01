@@ -93,6 +93,7 @@ void main() {
   group('script generation', () {
     test('a static effect produces no automation at all', () {
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([
           const Effect(
             id: 'fx1',
@@ -109,6 +110,7 @@ void main() {
 
     test('an animated effect produces a sampled script', () {
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([_animatedBlur()]),
         scriptPath: '/tmp/fx.cmd',
       );
@@ -122,6 +124,7 @@ void main() {
 
     test('commands target filter@label, the syntax ffmpeg expects', () {
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([_animatedBlur()]),
         scriptPath: '/tmp/fx.cmd',
       );
@@ -137,6 +140,7 @@ void main() {
 
     test('the value genuinely ramps across the script', () {
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([_animatedBlur()]),
         scriptPath: '/tmp/fx.cmd',
       );
@@ -173,6 +177,7 @@ void main() {
       );
 
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([flat]),
         scriptPath: '/tmp/fx.cmd',
       );
@@ -195,6 +200,7 @@ void main() {
       );
 
       final automation = EffectAutomationCompiler.compile(
+        fps: 30,
         clip: _clip([animatedSharpen]),
         scriptPath: '/tmp/fx.cmd',
       );

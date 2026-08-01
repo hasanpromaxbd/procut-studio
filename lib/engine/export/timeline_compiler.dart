@@ -31,6 +31,7 @@ import '../../core/utils/math_utils.dart';
 import '../../core/utils/time_utils.dart';
 import '../../domain/entities/clip.dart';
 import '../../domain/entities/effect.dart';
+import '../../domain/entities/export_range.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/keyframe.dart';
 import '../../domain/entities/layer_frame.dart';
@@ -64,6 +65,7 @@ class TimelineCompiler {
     required EncoderChoice encoder,
     required HardwareEncoderProbe encoderProbe,
     bool preferFastTransitions = false,
+    ExportRange? range,
   }) {
     final timeline = project.timeline;
     final (outWidth, outHeight) = settings.dimensionsFor(
@@ -170,19 +172,31 @@ class TimelineCompiler {
       }
     }
 
+    // A range trims the *tail* of the graph rather than the timeline, so
+    // every clip's placement, speed and automation is computed exactly as it
+    // would be for a full render — a range export must be a window onto the
+    // real thing, not a different edit that happens to be shorter.
+    final window = range?.clampedTo(duration);
+
     // Final format conversion. yuv420p is the only chroma layout every Android
     // decoder and every social platform reliably accepts.
     final videoOut = graph.newLabel('vout');
-    graph
+    final videoTail = graph
         .chain(inputs: [currentVideo], outputs: [videoOut])
-        .then(Filters.fps(fps))
+        .then(Filters.fps(fps));
+    if (window != null) {
+      videoTail
+          .then(Filters.trim(window.start, window.end))
+          .then(Filters.resetPts());
+    }
+    videoTail
         .then(Filter('format', {'pix_fmts': 'yuv420p'}))
         .then(Filters.setSar('1'));
 
     // ── 4. Audio ─────────────────────────────────────────────────────
     // GIF has no audio stream; compiling one would leave its labels dangling
     // and FFmpeg refuses a graph with an unconnected output.
-    final audioOut = settings.container == ExportContainer.gif
+    final fullAudio = settings.container == ExportContainer.gif
         ? null
         : _compileAudio(
       graph: graph,
@@ -192,6 +206,18 @@ class TimelineCompiler {
       registerInput: registerInput,
       warnings: warnings,
     );
+
+    // The mix is trimmed to the same window, so picture and sound stay in
+    // step — trimming only one is the classic way to ship a drifting export.
+    String? audioOut = fullAudio;
+    if (fullAudio != null && window != null) {
+      final trimmed = graph.newLabel('arange');
+      graph
+          .chain(inputs: [fullAudio], outputs: [trimmed])
+          .then(Filters.atrim(window.start, window.end))
+          .then(Filters.resetAudioPts());
+      audioOut = trimmed;
+    }
 
     // ── 5. Output flags ──────────────────────────────────────────────
     if (settings.container == ExportContainer.gif) {
@@ -272,7 +298,7 @@ class TimelineCompiler {
       filterGraph: graph.build(),
       outputArgs: outputArgs,
       outputPath: outputPath,
-      duration: duration,
+      duration: window?.duration ?? duration,
       width: outWidth,
       height: outHeight,
       fps: fps,
@@ -554,6 +580,7 @@ class TimelineCompiler {
         }
 
         chain.then(Filters.fps(fps));
+        final automation = _beginAutomation(chain, clip, workspaceDir, fps);
         // Same decision as for stills: an animated transform on video is a
         // digital pan/zoom and has to render, not freeze at frame one.
         if (_hasCameraMove(clip.transform)) {
@@ -573,16 +600,14 @@ class TimelineCompiler {
             outWidth,
             outHeight,
             frame: clip.frame,
+            clipForLabels: clip,
           );
         }
-        _collectAutomation(
-          _appendEffects(chain, clip, workspaceDir),
-          commandScripts,
-          warnings,
-        );
+        _appendEffects(chain, clip, automation);
+        _collectAutomation(automation, commandScripts, warnings);
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
-        chain.thenAll(MaskCompiler.build(clip.mask.resolveAt(Duration.zero)));
-        _appendOpacity(chain, clip.transform);
+        chain.thenAll(MaskCompiler.buildAnimated(clip.mask, clip.duration));
+        _appendOpacity(chain, clip);
 
         return _Segment(
           label: label,
@@ -612,6 +637,7 @@ class TimelineCompiler {
 
         final chain = graph.chain(inputs: ['$index:v'], outputs: [label]);
         chain.then(Filters.fps(fps));
+        final automation = _beginAutomation(chain, clip, workspaceDir, fps);
 
         // Animated scale/position is a camera move (Ken Burns on a still,
         // a digital push on video). `zoompan` is the filter built for it;
@@ -633,16 +659,14 @@ class TimelineCompiler {
             outWidth,
             outHeight,
             frame: clip.frame,
+            clipForLabels: clip,
           );
         }
-        _collectAutomation(
-          _appendEffects(chain, clip, workspaceDir),
-          commandScripts,
-          warnings,
-        );
+        _appendEffects(chain, clip, automation);
+        _collectAutomation(automation, commandScripts, warnings);
         chain.then(Filter('format', {'pix_fmts': 'yuva420p'}));
-        chain.thenAll(MaskCompiler.build(clip.mask.resolveAt(Duration.zero)));
-        _appendOpacity(chain, clip.transform);
+        chain.thenAll(MaskCompiler.buildAnimated(clip.mask, clip.duration));
+        _appendOpacity(chain, clip);
 
         return _Segment(
           label: label,
@@ -750,6 +774,7 @@ class TimelineCompiler {
         // The compound's own dressing applies to the composed result, the
         // way it would to any single clip.
         final chain = graph.chain(inputs: [innerLabel], outputs: [label]);
+        final automation = _beginAutomation(chain, clip, workspaceDir, fps);
         var dressed = false;
         final scale = clip.transform.scaleX.staticValue;
         if ((scale - 1).abs() > 0.001) {
@@ -772,16 +797,13 @@ class TimelineCompiler {
           chain.then(Filters.vflip());
           dressed = true;
         }
-        _collectAutomation(
-          _appendEffects(chain, clip, workspaceDir),
-          commandScripts,
-          warnings,
-        );
+        _appendEffects(chain, clip, automation);
+        _collectAutomation(automation, commandScripts, warnings);
         final maskFilters = MaskCompiler.build(
           clip.mask.resolveAt(Duration.zero),
         );
         chain.thenAll(maskFilters);
-        _appendOpacity(chain, clip.transform);
+        _appendOpacity(chain, clip);
         if (!dressed &&
             chain.filters.isEmpty) {
           // An empty chain is an FFmpeg parse error; `null` is a passthrough.
@@ -1002,6 +1024,7 @@ class TimelineCompiler {
     int outWidth,
     int outHeight, {
     LayerFrame frame = LayerFrame.none,
+    required Clip clipForLabels,
   }) {
     if (!transform.crop.isNone) {
       chain.then(
@@ -1023,12 +1046,27 @@ class TimelineCompiler {
       chain.thenAll(Filters.rotateQuarter(asset.rotationDegrees ~/ 90));
     }
 
-    final rotation = transform.rotation.staticValue % 360;
-    if (rotation.abs() > 0.01) {
-      if (rotation % 90 == 0) {
-        chain.thenAll(Filters.rotateQuarter((rotation ~/ 90).toInt()));
-      } else {
-        chain.then(Filters.rotate(rotation));
+    if (transform.rotation.isAnimated) {
+      // Always emitted and labelled, for the same reason animated opacity is:
+      // `sendcmd` needs an instance to talk to. `fillcolor=none` keeps the
+      // corners transparent as the frame turns, rather than stamping black
+      // over whatever is beneath.
+      chain.then(
+        Filter('rotate', {
+          'angle': FilterGraph.formatDouble(
+            transform.rotation.valueAt(Duration.zero) * 3.14159265358979 / 180,
+          ),
+          'fillcolor': 'none',
+        })..labelled(EffectAutomationCompiler.rotationLabelFor(clipForLabels)),
+      );
+    } else {
+      final rotation = transform.rotation.staticValue % 360;
+      if (rotation.abs() > 0.01) {
+        if (rotation % 90 == 0) {
+          chain.thenAll(Filters.rotateQuarter((rotation ~/ 90).toInt()));
+        } else {
+          chain.then(Filters.rotate(rotation));
+        }
       }
     }
 
@@ -1146,15 +1184,13 @@ class TimelineCompiler {
 
   /// Appends the clip's effect filters, wiring up `sendcmd` automation when
   /// any of them are keyframed.
-  EffectAutomation _appendEffects(
+  void _appendEffects(
     FilterChain chain,
     Clip clip,
-    String workspaceDir,
+    EffectAutomation automation,
   ) {
     final effects = clip.activeEffects;
-    if (effects.isEmpty) {
-      return const EffectAutomation(script: null, staticEffectTypes: []);
-    }
+    if (effects.isEmpty) return;
 
     // Animated effects are built at their peak so the filter instance survives
     // into the graph — see EffectAutomationCompiler.representativeResolution.
@@ -1171,22 +1207,37 @@ class TimelineCompiler {
 
     final filters = EffectCatalog.buildChain(resolved);
 
+    if (automation.hasScript) {
+      EffectAutomationCompiler.applyLabels(filters, effects);
+    }
+    chain.thenAll(filters);
+  }
+
+  /// Compiles a clip's automation and puts `sendcmd` at the head of its chain.
+  ///
+  /// At the head, deliberately: `sendcmd` only reaches filters *downstream* of
+  /// it, and the animated channels are spread across the whole chain —
+  /// rotation sits in the geometry stage, effects in the middle, opacity at
+  /// the end. Inserting it beside the effects reached the last two and
+  /// silently missed the first.
+  EffectAutomation _beginAutomation(
+    FilterChain chain,
+    Clip clip,
+    String workspaceDir,
+    int fps,
+  ) {
     final automation = EffectAutomationCompiler.compile(
       clip: clip,
       scriptPath: p.join(workspaceDir, 'fx_${clip.id}.cmd'),
+      fps: fps,
     );
-
     if (automation.hasScript) {
-      EffectAutomationCompiler.applyLabels(filters, effects);
-      // `sendcmd` only reaches filters downstream of it in the same chain.
       chain.then(
         Filter('sendcmd', {
           'f': FilterGraph.escapePath(automation.script!.path),
         }),
       );
     }
-
-    chain.thenAll(filters);
     return automation;
   }
 
@@ -1208,7 +1259,25 @@ class TimelineCompiler {
     }
   }
 
-  void _appendOpacity(FilterChain chain, Transform2D transform) {
+  /// Appends the alpha scale a clip's opacity implies.
+  ///
+  /// An *animated* opacity always emits the filter, labelled, even when it
+  /// starts fully opaque: `sendcmd` can only address an instance that exists,
+  /// and eliding it because frame one is opaque is exactly how a fade-out
+  /// silently never happens.
+  void _appendOpacity(FilterChain chain, Clip clip) {
+    final transform = clip.transform;
+    if (transform.opacity.isAnimated) {
+      chain.then(
+        Filter('colorchannelmixer', {
+          'aa': FilterGraph.formatDouble(
+            transform.opacity.valueAt(Duration.zero).clamp(0.0, 1.0),
+          ),
+        })..labelled(EffectAutomationCompiler.opacityLabelFor(clip)),
+      );
+      return;
+    }
+
     final opacity = transform.opacity.staticValue;
     if (opacity >= 0.999) return;
     // colorchannelmixer scales the alpha channel, which `overlay` then honours.

@@ -12,6 +12,7 @@ import '../../core/logging/app_logger.dart';
 import '../../core/utils/id_generator.dart';
 import '../../domain/entities/export_job.dart';
 import '../../domain/entities/export_preset.dart';
+import '../../domain/entities/export_range.dart';
 import '../../domain/entities/export_settings.dart';
 import '../../domain/entities/project.dart';
 
@@ -93,17 +94,25 @@ class ExportController extends Notifier<ExportProgress?> {
 
   bool get isRunning => state != null && !state!.isTerminal;
 
-  Future<void> start(Project project, ExportSettings settings) async {
+  Future<void> start(
+    Project project,
+    ExportSettings settings, {
+    ExportRange? range,
+  }) async {
     if (isRunning) return;
 
     final jobId = IdGenerator.exportJob();
     _jobId = jobId;
-    _log.i('starting export', fields: {'job': jobId, 'project': project.id});
+    _log.i('starting export', fields: {
+      'job': jobId,
+      'project': project.id,
+      if (range != null) 'range': range.toString(),
+    });
 
     await _subscription?.cancel();
     _subscription = ref
         .read(exportRepositoryProvider)
-        .export(project, settings, jobId: jobId)
+        .export(project, settings, jobId: jobId, range: range)
         .listen(
           (progress) => state = progress,
           onError: (Object error, StackTrace stack) {

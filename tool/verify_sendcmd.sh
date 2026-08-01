@@ -70,5 +70,36 @@ echo "  unique frames: $UNIQUE"
 [ "$FIRST" != "$LAST" ] || { echo "FAIL: blur did not change over time"; exit 1; }
 [ "$UNIQUE" -gt 5 ] || { echo "FAIL: too few distinct frames — animation is stepping badly"; exit 1; }
 
+
+# ── 4. A command at the clip's duration never fires ─────────────────────
+# There is no frame at that instant, so the animation's endpoint value is
+# never applied — a fade to opaque stops one sample short. The generator
+# clamps its last sample to the final frame; this proves why.
+echo "== the endpoint value must land on a frame that exists =="
+ffmpeg -hide_banner -loglevel error -f lavfi -i "color=c=red:s=64x64:d=1:r=10" \
+    -frames:v 1 layer.png
+
+check_endpoint() {
+    printf '0.0 colorchannelmixer@op aa 0;\n%s colorchannelmixer@op aa 1;\n' "$1" > ep.txt
+    ffmpeg -hide_banner -loglevel error -loop 1 -t 1 -i layer.png -filter_complex \
+"color=c=blue:s=64x64:d=1:r=10[bg];\
+[0:v]fps=10,sendcmd=f=ep.txt,format=yuva420p,colorchannelmixer@op=aa=0[l];\
+[bg][l]overlay=format=auto[v]" -map "[v]" -frames:v 10 -c:v libx264 -preset ultrafast -y ep.mp4
+    ffmpeg -hide_banner -loglevel error -i ep.mp4 -vf "select='eq(n,9)'" -frames:v 1 -y last.png
+    ffmpeg -hide_banner -loglevel error -i last.png -vf crop=1:1:32:32 \
+        -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | awk '{print $1}'
+}
+
+AT_DURATION="$(check_endpoint 1.0)"
+AT_LAST_FRAME="$(check_endpoint 0.9)"
+printf "  command at 1.0s (the duration): final red = %s\n" "$AT_DURATION"
+printf "  command at 0.9s (the last frame): final red = %s\n" "$AT_LAST_FRAME"
+
+[ "$AT_LAST_FRAME" -gt 200 ] || {
+    echo "FAIL: a command on the last frame did not take effect"; exit 1; }
+[ "$AT_DURATION" -lt 200 ] || {
+    echo "NOTE: this build also runs a command scheduled past the last frame"; }
+echo "  clamping the last sample to the final frame is required"
+echo
 echo
 echo "PASS: sendcmd automation verified end to end"
