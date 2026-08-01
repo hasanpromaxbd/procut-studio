@@ -89,6 +89,8 @@ abstract class AppStrings {
   String get toolMedia2;
   String get toolCurves;
   String get toolChapters;
+  String get toolAudioDetail;
+  String get toolMulticam;
 
   // ── Export ───────────────────────────────────────────────────────────
   String get startExport;
@@ -231,6 +233,10 @@ class AppStringsEn extends AppStrings {
   String get toolCurves => 'Curves';
   @override
   String get toolChapters => 'Chapters';
+  @override
+  String get toolAudioDetail => 'Audio';
+  @override
+  String get toolMulticam => 'Multicam';
 
   @override
   String get startExport => 'Start export';
@@ -393,6 +399,10 @@ class AppStringsBn extends AppStrings {
   String get toolCurves => 'কার্ভ';
   @override
   String get toolChapters => 'চ্যাপ্টার';
+  @override
+  String get toolAudioDetail => 'অডিও';
+  @override
+  String get toolMulticam => 'মাল্টিক্যাম';
 
   @override
   String get startExport => 'এক্সপোর্ট শুরু করুন';

@@ -16,7 +16,7 @@ tests that run without a device.
 
 ```
 flutter analyze              →  No issues found
-flutter test                 →  327 tests, all passing
+flutter test                 →  381 tests, all passing
 flutter build apk --release  →  built (117 MB, R8 + shrinker)
 tool/verify_shaders.sh       →  PASS (real impellerc)
 tool/verify_sendcmd.sh       →  PASS (real ffmpeg)
@@ -54,6 +54,10 @@ what is architected with a working seam but needs an external piece. See
 | Layer placement: position, scale, transparent stacking | Implemented + tested — pixel-verified |
 | PiP frames, split-screen layouts, caption editor | Implemented + tested |
 | Shot colour match, media manager, edit-inside-a-group | Implemented + tested |
+| Animated opacity, masks and rotation on export | Implemented + tested — pixel-verified |
+| Range export, test render, keyframe curve editor | Implemented + tested |
+| Title templates, chapter export, watermark | Implemented + tested |
+| Detailed audio view, pre-render planning, multicam | Implemented + tested |
 | Motion tracking → keyframes, chroma-key eyedropper | Implemented + tested |
 | Stabilisation (two-pass `vidstab`), auto-reframe | Implemented + tested |
 | Platform export presets (Reels/Shorts/TikTok/YouTube) | Implemented + tested |

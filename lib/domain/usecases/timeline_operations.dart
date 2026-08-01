@@ -1595,6 +1595,70 @@ abstract final class TimelineOperations {
     );
   }
 
+  // ── Multicam ─────────────────────────────────────────────────────────
+
+  /// Cuts [clipId] at [at] and swaps the second half to [angle].
+  ///
+  /// This is the whole multicam gesture: while watching, tap an angle and the
+  /// programme switches there from that instant. It is a razor plus a media
+  /// swap, so the result is two ordinary clips — trimmable, re-swappable, and
+  /// invisible to everything downstream. No multicam mode to be stuck in.
+  ///
+  /// [angleSourceIn] is where that angle's own footage sits at this timeline
+  /// instant; the caller knows the sync offsets, so it computes that rather
+  /// than this guessing.
+  static Result<Timeline> switchAngle(
+    Timeline timeline,
+    String clipId,
+    Duration at, {
+    required String angleAssetId,
+    required Duration angleSourceIn,
+    String? angleLabel,
+  }) {
+    final found = timeline.findClip(clipId);
+    if (found == null) {
+      return const Result.err(InvalidEditFailure('Clip not found.'));
+    }
+    final clip = found.$2;
+    if (clip is! VideoClip) {
+      return const Result.err(
+        InvalidEditFailure('Angle switching works on video clips.'),
+      );
+    }
+
+    // Already showing this angle: switching again would split for nothing.
+    if (clip.assetId == angleAssetId && clip.containsTime(at)) {
+      return const Result.err(
+        InvalidEditFailure('That angle is already on screen here.'),
+      );
+    }
+
+    final cut = split(timeline, clipId, at);
+    if (cut is Err<Timeline>) return cut;
+    var next = cut.getOrElse(timeline);
+
+    // The right-hand piece is the one to re-point; find it by position
+    // rather than id, because `split` mints a fresh id for it.
+    final track = next.trackById(clip.trackId);
+    final second = track?.clipAt(at);
+    if (second is! VideoClip) {
+      return const Result.err(
+        InvalidEditFailure('Internal error switching the angle.'),
+      );
+    }
+
+    next = next.replaceTrack(
+      track!.replaceClip(
+        second.copyWith(
+          assetId: angleAssetId,
+          sourceIn: angleSourceIn,
+          label: angleLabel ?? second.label,
+        ),
+      ),
+    );
+    return Result.ok(next);
+  }
+
   // ── Grouping ─────────────────────────────────────────────────────────
 
   /// Bundles [clipIds] into one [CompoundClip] on their shared track.

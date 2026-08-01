@@ -976,6 +976,37 @@ class EditorController extends Notifier<EditorState?> {
     );
   }
 
+  /// Cuts at [at] and shows [asset] from there on — the multicam switch.
+  ///
+  /// The angle's asset is registered on the project first, so the swapped
+  /// clip resolves like any other and the media manager knows about it.
+  void switchAngle(
+    String clipId,
+    Duration at, {
+    required MediaAsset asset,
+    required Duration sourceIn,
+    String? label,
+  }) {
+    final current = state;
+    if (current == null) return;
+
+    if (current.project.asset(asset.id) == null) {
+      state = current.copyWith(project: current.project.withAsset(asset));
+    }
+
+    _apply(
+      TimelineOperations.switchAngle(
+        state!.timeline,
+        clipId,
+        at,
+        angleAssetId: asset.id,
+        angleSourceIn: sourceIn,
+        angleLabel: label,
+      ),
+      'switch angle',
+    );
+  }
+
   // ── Grouping ─────────────────────────────────────────────────────────
 
   /// Groups the selection, or dissolves it when exactly one group is

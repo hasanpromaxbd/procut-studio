@@ -37,6 +37,7 @@ import '../export/export_screen.dart';
 import '../home/templates_screen.dart';
 import 'editor_shortcuts.dart';
 import 'sheets/ai_tools_sheet.dart';
+import 'sheets/audio_detail_sheet.dart';
 import 'sheets/caption_sheet.dart';
 import 'sheets/chapters_sheet.dart';
 import 'sheets/curve_sheet.dart';
@@ -48,6 +49,7 @@ import 'sheets/mask_sheet.dart';
 import 'sheets/media_sheet.dart';
 import 'sheets/mixer_sheet.dart';
 import 'sheets/motion_sheet.dart';
+import 'sheets/multicam_sheet.dart';
 import 'sheets/record_sheet.dart';
 import 'sheets/rhythm_sheet.dart';
 import 'sheets/scopes_sheet.dart';
@@ -559,6 +561,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           sheet: RhythmSheet(projectId: widget.projectId),
         );
 
+      case _ToolAction.multicam:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: MulticamSheet(projectId: widget.projectId),
+        );
+
+      case _ToolAction.audioDetail:
+        if (!mounted) return;
+        await ToolSheet.show<void>(
+          context,
+          sheet: AudioDetailSheet(projectId: widget.projectId),
+        );
+
       case _ToolAction.chapters:
         if (!mounted) return;
         await ToolSheet.show<void>(
@@ -857,6 +873,8 @@ enum _ToolAction {
   media,
   curves,
   chapters,
+  audioDetail,
+  multicam,
   mixer,
   addTrack,
 }
@@ -996,6 +1014,17 @@ class _ToolRail extends ConsumerWidget {
         label: strings.toolJumpCut,
         enabled: hasSelection,
         onPressed: () => onAction(_ToolAction.jumpCut),
+      ),
+      ToolIconButton(
+        icon: Icons.switch_video_rounded,
+        label: strings.toolMulticam,
+        onPressed: () => onAction(_ToolAction.multicam),
+      ),
+      ToolIconButton(
+        icon: Icons.graphic_eq_rounded,
+        label: strings.toolAudioDetail,
+        enabled: hasSelection,
+        onPressed: () => onAction(_ToolAction.audioDetail),
       ),
       ToolIconButton(
         icon: Icons.bookmarks_rounded,

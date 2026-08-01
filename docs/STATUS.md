@@ -5,7 +5,7 @@ Per-feature, honestly. "Implemented" means the code path exists end to end.
 it yet. "Architected" means the interface and integration point exist but an
 external piece is required.
 
-Verified state: `flutter analyze` clean, 327 tests passing, debug and release
+Verified state: `flutter analyze` clean, 381 tests passing, debug and release
 APKs build. `tool/verify_shaders.sh`, `tool/verify_sendcmd.sh`, `tool/verify_ducking.sh`
 and `tool/verify_placement.sh` all pass against real impellerc/ffmpeg
 binaries.
@@ -326,6 +326,45 @@ Notes on the limits, plainly: shot match moves level and cast, not *look* — fo
 numbers cannot carry a grade, and the sheet says so. Group edit mode swaps the
 visible timeline for the members', which is why every operation works in there
 with no special case; the whole inner session undoes as one step from outside.
+
+## Fifth wave (July 2026)
+
+Again opened by finishing what was half-kept.
+
+| Fix | Status |
+|---|---|
+| Opacity keyframes animate on export (a fade rendered at one fixed opacity) | Fixed + tested + pixel-verified |
+| Mask parameters animate on export (sampled once at t=0, never moved) | Fixed + tested |
+| Rotation keyframes animate on export | Fixed + tested |
+| Animation endpoints are actually reached (last command fell past the last frame) | Fixed + tested + pixel-verified |
+
+Opacity and rotation ride `sendcmd`, which had to move to the head of each
+clip's chain — it only reaches filters downstream, and the animated channels
+are spread across the whole chain. Masks go the other way: `geq` takes no
+commands but does expose `T`, so the animation lives in the expression.
+
+| Feature | Status |
+|---|---|
+| Range export (in/out points), trimming the same graph's tail | Implemented + tested |
+| Test render — ten seconds at the playhead, full quality | Implemented |
+| Keyframe curve editor with draggable bézier handles | Implemented + tested |
+| Animated title templates (lower third, card, quote, bug, chapter) | Implemented |
+| Chapter markers → YouTube / plain / WebVTT timestamp lists | Implemented + tested |
+| Export watermark (corner, size, opacity) | Implemented + tested + pixel-verified |
+| Detailed audio view — zoomable waveform, frame nudges | Implemented |
+| Pre-render planning — finds spans the preview cannot play | Implemented + tested |
+| Multicam — audio sync by envelope correlation, angle switching | Implemented + tested |
+
+Verifying the watermark against a real ffmpeg caught a bug that would have
+shipped: `-loop 1` is an infinite stream and overlay's default `shortest=0`
+waits for it forever, so the render hung. Bounded with `-t` and `shortest=1`.
+
+Limits, stated plainly: audio sync correlates the 40 Hz envelope, so it pins
+an offset to about ±25 ms — inside a frame at 30 fps, and it refuses rather
+than guesses when the match is weak. Pre-render *planning* is implemented and
+tested; the rendering it would trigger reuses range export. Mask animation
+interpolates linearly between keyframes rather than following each keyframe's
+own easing curve, because the FFmpeg evaluator has no smoothstep.
 
 ## Known gaps
 
